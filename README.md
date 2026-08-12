@@ -157,10 +157,9 @@ source ~/.claudex/claudex.sh
 
 ```bash
 claudex                              # 自動用最新的 GPT 模型
-claudex --models                     # 列出可用模型，標出會用哪一個
+claudex --models                     # 列出可用的對話模型，標出會用哪一個
+claudex --models-all                 # 列出 proxy 上的全部模型，含被濾掉的
 claudex --print "hello"              # 任何 Claude Code 參數都能照傳
-claudex --model gpt-5.5              # 這次指定模型
-CLAUDEX_MODEL=gpt-5.6-sol claudex    # 這次固定某個模型
 
 claude                               # 原本的 Claude Code，完全不受影響
 ```
@@ -174,6 +173,38 @@ claude                               # 原本的 Claude Code，完全不受影�
   gpt-5.5                  2026-04-23
   gpt-5.4-mini             2026-03-17
 ```
+
+`--models-all` 會多列出被 `CLAUDEX_EXCLUDE` 濾掉的項目（繪圖、review 之類的端點，
+不能拿來跑 session）：
+
+```
+  codex-auto-review        2026-04-23   (not a chat model, skipped)
+  gpt-image-2              2024-01-01   (not a chat model, skipped)
+```
+
+### 換模型
+
+三種範圍，看你要影響多久：
+
+```bash
+# 只有這一次
+claudex --model gpt-5.6-sol
+
+# 只有這個終端機視窗（之後每次 claudex 都用它）
+export CLAUDEX_MODEL=gpt-5.6-sol
+claudex
+
+# 永久（加到 ~/.zshrc，放在 source claudex.sh 之前或之後都可以）
+echo 'export CLAUDEX_MODEL=gpt-5.6-sol' >> ~/.zshrc && source ~/.zshrc
+
+# 取消固定，改回自動選最新
+unset CLAUDEX_MODEL          # 若已寫進 ~/.zshrc，要把那行刪掉
+```
+
+啟動之後想在 session 內換，用 Claude Code 內建的 `/model`（選單裡有 **Custom model** 可以直接
+輸入 `gpt-5.6-sol` 這類型號）。這只影響當下那個 session，不會改變 `claudex` 下次啟動的預設。
+
+驗證現在會用哪個：`claudex --models` 看 `<- claudex uses this` 標在誰身上。
 
 ---
 

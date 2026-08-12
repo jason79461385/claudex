@@ -17,9 +17,11 @@
 : "${CLAUDEX_EXCLUDE:=image|audio|tts|whisper|transcribe|embed|moderation|realtime|review|search}"
 : "${CLAUDEX_TOOL_SEARCH:=true}"
 
-# Chat-capable models the proxy currently serves, newest first.
-# Output is "<id>\t<YYYY-MM-DD>". Models released the same day sort alphabetically,
-# so the choice stays deterministic instead of depending on API ordering.
+# Every model the proxy serves, newest first.
+# Output is "<id>\t<YYYY-MM-DD>\t<ok|skip>", where "skip" marks ids matching
+# CLAUDEX_EXCLUDE (image/audio/review endpoints that cannot drive a session).
+# Models released the same day sort alphabetically, so the choice stays
+# deterministic instead of depending on API ordering.
 __claudex_models() {
   curl -sf --max-time 5 -H "Authorization: Bearer ${CLAUDEX_API_KEY}" \
        "${CLAUDEX_BASE_URL}/v1/models" 2>/dev/null |
@@ -30,25 +32,30 @@ try:
 except Exception:
     sys.exit(1)
 skip = re.compile(os.environ["CLAUDEX_EXCLUDE"], re.I)
-rows = [m for m in rows if m.get("id") and not skip.search(m["id"])]
+rows = [m for m in rows if m.get("id")]
 rows.sort(key=lambda m: (-int(m.get("created") or 0), m["id"]))
 for m in rows:
     day = datetime.date.fromtimestamp(int(m.get("created") or 0)).isoformat()
-    print(m["id"] + "\t" + day)
+    print(m["id"] + "\t" + day + "\t" + ("skip" if skip.search(m["id"]) else "ok"))
 '
 }
 
-# The model that would be used right now.
+# The model that would be used right now: newest usable one.
 __claudex_pick() {
   local id
-  id=$(__claudex_models | head -1 | cut -f1)
+  id=$(__claudex_models | awk -F'\t' '$3=="ok"{print $1; exit}')
   printf '%s\n' "${id:-$CLAUDEX_FALLBACK_MODEL}"
 }
 
 claudex() {
-  local model="" list a prev="" id day
+  local model="" list a prev="" id day kind showall=""
 
-  if [ "$1" = "--models" ] || [ "$1" = "--list-models" ]; then
+  case "$1" in
+    --models|--list-models) showall="" ;;
+    --models-all)           showall="yes" ;;
+  esac
+
+  if [ -n "$showall" ] || [ "$1" = "--models" ] || [ "$1" = "--list-models" ]; then
     list=$(__claudex_models)
     if [ -z "$list" ]; then
       echo "claudex: cannot reach CLIProxyAPI at ${CLAUDEX_BASE_URL}" >&2
@@ -56,9 +63,11 @@ claudex() {
       echo "         Linux: systemctl --user restart cli-proxy-api" >&2
       return 1
     fi
-    model="${CLAUDEX_MODEL:-$(printf '%s\n' "$list" | head -1 | cut -f1)}"
-    printf '%s\n' "$list" | while IFS="$(printf '\t')" read -r id day; do
-      if [ "$id" = "$model" ]; then
+    model="${CLAUDEX_MODEL:-$(__claudex_pick)}"
+    printf '%s\n' "$list" | while IFS="$(printf '\t')" read -r id day kind; do
+      if [ "$kind" = "skip" ]; then
+        [ -n "$showall" ] && printf '  %-24s %s   (not a chat model, skipped)\n' "$id" "$day"
+      elif [ "$id" = "$model" ]; then
         printf '  %-24s %s   <- claudex uses this\n' "$id" "$day"
       else
         printf '  %-24s %s\n' "$id" "$day"
