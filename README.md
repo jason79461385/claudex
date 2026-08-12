@@ -201,8 +201,23 @@ echo 'export CLAUDEX_MODEL=gpt-5.6-sol' >> ~/.zshrc && source ~/.zshrc
 unset CLAUDEX_MODEL          # 若已寫進 ~/.zshrc，要把那行刪掉
 ```
 
-啟動之後想在 session 內換，用 Claude Code 內建的 `/model`（選單裡有 **Custom model** 可以直接
-輸入 `gpt-5.6-sol` 這類型號）。這只影響當下那個 session，不會改變 `claudex` 下次啟動的預設。
+### 在 session 內換模型
+
+直接打 `/model` 會發現**選單裡只有一個項目** —— 這是正常的。Claude Code 沒辦法列舉自訂 proxy 上
+有哪些模型，所以選單只知道你當下這個。
+
+改用**帶參數**的形式就可以（實測有效）：
+
+```
+/model gpt-5.6-sol
+```
+
+之後 `/status` 就會顯示 `Model: gpt-5.6-sol`。型號用 `claudex --models` 查。
+
+兩個注意事項：
+
+- 只影響**當下這個 session**，`claudex` 下次啟動仍是自動選最新。要改預設請用上面的 `CLAUDEX_MODEL`。
+- `/model` 只換主模型。subagent 用的是啟動時 `CLAUDE_CODE_SUBAGENT_MODEL` 的值，不會跟著變。
 
 驗證現在會用哪個：`claudex --models` 看 `<- claudex uses this` 標在誰身上。
 
