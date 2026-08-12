@@ -132,7 +132,7 @@ curl -s -H "Authorization: Bearer sk-dummy" http://127.0.0.1:8317/v1/models
 ### 步驟 6：安裝 claudex
 
 ```bash
-git clone https://github.com/<你的帳號>/claudex.git ~/.claudex
+git clone https://github.com/jason79461385/claudex.git ~/.claudex
 ```
 
 **zsh**（macOS 預設）— 加到 `~/.zshrc`：
