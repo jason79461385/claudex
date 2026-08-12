@@ -1,0 +1,8 @@
+# Never commit CLIProxyAPI credentials or config that may embed keys.
+.cli-proxy-api/
+*.conf
+config.yaml
+*auth*.json
+codex-*.json
+
+.DS_Store
