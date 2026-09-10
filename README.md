@@ -9,21 +9,25 @@
 
 ## 這是什麼
 
-裝完之後你會有兩個指令：
+裝完之後你會有四個指令：
 
 | 指令 | 走哪裡 | 用什麼模型 |
 |---|---|---|
 | `claude` | Anthropic 官方，**完全不變** | 你原本的 Claude 模型 |
 | `claudex` | 本機 CLIProxyAPI (`127.0.0.1:8317`) | 目前最新的 GPT 模型，**自動偵測** |
+| `claudemini` | 同一個 CLIProxyAPI | 目前最新的 Gemini 模型，**自動偵測** |
+| `claudeop` | OpenCode Go (`opencode.ai/zen/go/v1`) | Claude 直連；DeepSeek V4 等模型經 localhost bridge |
 
-`claudex` 是一個 shell function，六個環境變數只在它執行的那一瞬間存在，不會外洩到你的 shell，也不會讓 `claude` 被永久導向 proxy。
+`claudex`、`claudemini` 和 `claudeop` 都是 shell function。它們只在執行該次指令時注入 proxy 環境變數，不會外洩到你的 shell，也不會讓 `claude` 被永久導向 proxy。
 
 ## 需求
 
 - **Claude Code** 已安裝（跨 session 溝通功能需要 2.1.228 以上，見〈跨 session 溝通〉）
-- **Python 3**（`claudex` 用它解析模型清單；macOS/Linux 通常內建）
-- **一個可用的 ChatGPT / Codex 訂閱帳號**（OAuth 登入用）
-- macOS 需要 Homebrew；Linux 用官方安裝腳本；Windows 用 release 執行檔
+- **Python 3**（三個 wrapper 都用它解析模型清單；macOS/Linux 通常內建）
+- 使用 `claudex`：一個可用的 ChatGPT / Codex 憑證（OAuth 登入用）
+- 使用 `claudemini`：CLIProxyAPI 支援的 Gemini 憑證（Antigravity OAuth 或 API key）
+- 使用 `claudeop`：OpenCode Go API key（從 [OpenCode auth](https://opencode.ai/auth) 建立）
+- macOS 需要 Homebrew；Linux 用官方安裝腳本；Windows 用 release 執行檔（Windows 目前只提供 `claudex.ps1`）
 
 ---
 
@@ -96,7 +100,9 @@ systemctl --user start cli-proxy-api
 cliproxyapi
 ```
 
-### 步驟 4：Codex OAuth 登入
+### 步驟 4：登入你要使用的模型服務
+
+GPT 路線使用 Codex OAuth：
 
 ```bash
 cliproxyapi -codex-login
@@ -108,7 +114,17 @@ cliproxyapi -codex-login
 cliproxyapi -codex-device-login
 ```
 
-憑證會存到 `~/.cli-proxy-api/`。**這個目錄不要分享、不要進版控。**
+Gemini 路線使用 Antigravity OAuth：
+
+```bash
+cliproxyapi -antigravity-login
+```
+
+也可以在 CLIProxyAPI 設定檔放入 `gemini-api-key`，不用 OAuth。兩條路線可以同時設定；之後由 `claudex` 或 `claudemini` 選擇要走哪一條。
+
+OpenCode Go 不經過 CLIProxyAPI，直接到 [OpenCode auth](https://opencode.ai/auth) 登入並建立 API key。需要依 OpenCode 當前要求完成帳務設定；這把 key 只放在 shell 的 `CLAUDEOP_API_KEY`，不要寫進 repo。
+
+憑證會存到 `~/.cli-proxy-api/`。OpenCode key 不會存到這裡；兩種憑證都不要分享、不要進版控。
 
 **登入完成後一定要重啟服務**，否則它不會載入新憑證：
 
@@ -129,27 +145,43 @@ curl -s -H "Authorization: Bearer sk-dummy" http://127.0.0.1:8317/v1/models
 
 清單如果是**空的**，代表 OAuth 憑證沒載入 —— 回到步驟 4 重登再重啟。
 
-### 步驟 6：安裝 claudex
+### 步驟 6：手動放置 wrapper
+
+這個 repo 不需要 `npm install`、編譯或安裝 daemon；三個 `.sh` 檔是 wrapper，`claudeop_bridge.py` 會在選用 DeepSeek 等非 Claude 模型時暫時啟動在 localhost。你可以選一種方式取得檔案：
+
+**方式 A：clone repo（推薦）**
 
 ```bash
 git clone https://github.com/jason79461385/claudex.git ~/.claudex
+```
+
+**方式 B：repo 已經在本機**
+
+```bash
+mkdir -p ~/.claudex
+cp /path/to/claudex/claudex.sh ~/.claudex/
+cp /path/to/claudex/claudemini.sh ~/.claudex/
+cp /path/to/claudex/claudeop.sh ~/.claudex/
+cp /path/to/claudex/claudeop_bridge.py ~/.claudex/
 ```
 
 **zsh**（macOS 預設）— 加到 `~/.zshrc`：
 
 ```zsh
 source ~/.claudex/claudex.sh
+source ~/.claudex/claudemini.sh
+source ~/.claudex/claudeop.sh
 ```
 
-**bash** — 加到 `~/.bashrc`，內容同上。
+只需要某一條路線時，可以只 source 對應檔案。**bash** — 將相同內容加到 `~/.bashrc`。
 
-**PowerShell** — 加到 `$PROFILE`：
+**PowerShell** — 目前提供已移植的 `claudex.ps1`，加到 `$PROFILE`：
 
 ```powershell
 . $HOME\.claudex\claudex.ps1
 ```
 
-然後 `source ~/.zshrc`（或開新視窗）。
+然後 `source ~/.zshrc` / `source ~/.bashrc`，或關掉再開一個 PowerShell 視窗。wrapper 不需要 `chmod +x`，因為它是用 `source` / dot-source 載入的。
 
 ---
 
@@ -157,9 +189,24 @@ source ~/.claudex/claudex.sh
 
 ```bash
 claudex                              # 自動用最新的 GPT 模型
-claudex --models                     # 列出可用的對話模型，標出會用哪一個
+claudex --models                     # 列出可用的 GPT 對話模型
 claudex --models-all                 # 列出 proxy 上的全部模型，含被濾掉的
 claudex --print "hello"              # 任何 Claude Code 參數都能照傳
+
+claudemini                           # 自動用最新的 Gemini 模型
+claudemini --models                  # 列出可用的 Gemini 對話模型
+claudemini --models-all              # 連同非 Gemini 模型一起列出
+claudemini --print "hello"           # 使用 Gemini route 執行
+
+printf 'OpenCode Go API key: '
+read -r -s CLAUDEOP_API_KEY
+printf '\n'
+claudeop                             # 預設使用 deepseek-v4-pro
+claudeop --models                    # 列出 OpenCode Go 全部模型與 route
+claudeop --models-all                # 同上，保留相容的別名
+claudeop --print "hello"             # 使用 OpenCode Go 執行
+claudeop --model deepseek-v4-pro --print "hello"  # 經 localhost bridge 使用 DeepSeek V4
+unset CLAUDEOP_API_KEY               # 不留在目前 shell
 
 claude                               # 原本的 Claude Code，完全不受影響
 ```
@@ -182,6 +229,37 @@ claude                               # 原本的 Claude Code，完全不受影�
   gpt-image-2              2024-01-01   (not a chat model, skipped)
 ```
 
+### `claudemini` 的特別行為
+
+`claudemini` 和 `claudex` 共用同一個 proxy，但不會把「全站最新模型」誤選成 GPT：
+
+1. 先查 `/v1/models`。
+2. 只保留符合 `CLAUDEMINI_INCLUDE` 的 id（預設 `gemini|antigravity`）。
+3. 再排除 image、audio、review 等非對話模型。
+4. Gemini route 常回傳 `created=0`，所以改用模型 id 裡的版本號排序；無版本號的 id 放最後。
+
+Gemini 的 function-calling 目前可能無法驗證 `query.where` 的 tuple schema，因此 `claudemini` 預設把 `Artifact` 從送出的工具宣告中移除。這不是把權限藏起來而已，而是避免整個請求在產生文字前就因 schema 400；確認你的 Gemini route 已支援 `prefixItems` 後，才設定：
+
+```bash
+export CLAUDEMINI_DISALLOW=""
+```
+
+### `claudeop` 的特別行為
+
+`claudeop` 會依模型選擇 route：
+
+- `claude-*`：直接使用 OpenCode Go 的 Anthropic Messages endpoint。
+- `deepseek-*`（包含 DeepSeek V4）：自動啟動 `claudeop_bridge.py`，在 `127.0.0.1` 把 Claude Code 的 Messages request 轉成 OpenCode 的 Chat Completions request。
+- `claudeop --models`：列出 OpenCode Go 回傳的**全部模型**，並標示 direct 或 local bridge。
+- bridge 只在該次 `claudeop` 執行期間存在，結束後自動停止；API key 由 bridge 直接轉送給 OpenCode，不寫入 command line。
+- 預設模型是 `deepseek-v4-pro`；可用 `CLAUDEOP_MODEL` 或 `--model` 改變。
+- `CLAUDEOP_TOOL_SEARCH` 預設是 `false`。確認 route 會轉送 `tool_reference` 後，才改成 `true`。
+- 非 Claude 模型會以已知的 Claude Code model label 啟動，bridge 再把 upstream model 固定回你選的 OpenCode model；因此不會在本地 model catalog 階段因 `deepseek-*` 而拒絕。
+- bridge 也提供 localhost 的 `GET /v1/models` 與 `GET /v1/models/<id>` probe，避免 Claude Code 在送出 Messages 前把相容 model 誤判成不可用。
+- `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1` 仍會啟用，避免 Claude Code 對這個相容 label 錯誤套用 context window 限制；實際 context 上限仍由 OpenCode 模型決定。
+
+這條路線不經過本機 CLIProxyAPI，也不會使用 Codex 或 Gemini OAuth。非 Claude 模型的工具呼叫、串流和文字回覆由 bridge 轉換；圖片、文件與 OpenCode 尚未支援的特殊工具仍可能不相容。
+
 ### 換模型
 
 三種範圍，看你要影響多久：
@@ -200,6 +278,45 @@ echo 'export CLAUDEX_MODEL=gpt-5.6-sol' >> ~/.zshrc && source ~/.zshrc
 # 取消固定，改回自動選最新
 unset CLAUDEX_MODEL          # 若已寫進 ~/.zshrc，要把那行刪掉
 ```
+
+`claudemini` 使用同樣的三種方式，只是變數和模型名改成 Gemini：
+
+```bash
+# 只有這一次
+claudemini --model gemini-3.1-pro-preview
+
+# 固定目前終端機視窗
+export CLAUDEMINI_MODEL=gemini-3.1-pro-preview
+claudemini
+
+# 取消固定，恢復自動挑選
+unset CLAUDEMINI_MODEL
+```
+
+`claudeop` 同樣支援單次或固定模型：
+
+```bash
+# 只有這一次
+claudeop --model claude-sonnet-4-6
+
+# 固定目前終端機視窗
+export CLAUDEOP_MODEL=claude-sonnet-4-6
+claudeop
+
+# 取消固定，恢復預設 deepseek-v4-pro
+unset CLAUDEOP_MODEL
+```
+
+DeepSeek V4 會自動走 bridge：
+
+```bash
+claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"
+export CLAUDEOP_MODEL=deepseek-v4-pro
+export CLAUDEOP_SUBAGENT_MODEL=deepseek-v4-pro
+claudeop
+```
+
+顯式傳入的 `--model` / `-m` 優先於環境變數；可用的實際 id 先用 `claudex --models`、`claudemini --models` 或 `claudeop --models` 查。
 
 ### 在 session 內換模型
 
@@ -258,12 +375,80 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 |---|---|---|
 | `CLAUDEX_BASE_URL` | `http://127.0.0.1:8317` | proxy 位址 |
 | `CLAUDEX_API_KEY` | `sk-dummy` | proxy 金鑰，要和 `api-keys` 一致 |
-| `CLAUDEX_MODEL` | *(空)* | 固定模型，設了就跳過自動偵測 |
+| `CLAUDEX_MODEL` | *(空)* | 固定主模型，設了就跳過自動偵測 |
+| `CLAUDEX_SUBAGENT_MODEL` | `gpt-5.6-terra` | 所有新建 subagent 使用的模型；不隨主模型自動切換 |
+| `CLAUDEX_MAX_CONTEXT_TOKENS` | *(空)* | 已確認的模型 context window；設定後傳給 Claude Code 作為 auto-compaction 門檻 |
 | `CLAUDEX_FALLBACK_MODEL` | `gpt-5.6-sol` | proxy 連不上時的保底 |
 | `CLAUDEX_EXCLUDE` | `image\|audio\|tts\|...` | 要忽略的模型 id 正規表達式 |
 | `CLAUDEX_TOOL_SEARCH` | `true` | 見〈ENABLE_TOOL_SEARCH〉 |
 
+`claudemini` 使用另一組前綴，避免兩條路線互相污染：
+
+| 變數 | 預設 | 用途 |
+|---|---|---|
+| `CLAUDEMINI_BASE_URL` | `http://127.0.0.1:8317` | proxy 位址 |
+| `CLAUDEMINI_API_KEY` | `sk-dummy` | proxy 金鑰 |
+| `CLAUDEMINI_MODEL` | *(空)* | 固定 Gemini 主模型 |
+| `CLAUDEMINI_SUBAGENT_MODEL` | *(空，跟隨主模型)* | subagent 模型 |
+| `CLAUDEMINI_SUBAGENT_FORCE` | `1` | 強制 subagent 留在 Gemini route |
+| `CLAUDEMINI_MAX_CONTEXT_TOKENS` | `1000000` | 傳給 Claude Code 的 context / auto-compaction 門檻 |
+| `CLAUDEMINI_FALLBACK_MODEL` | `gemini-3.1-pro-preview` | proxy 連不上或沒有可選模型時的保底 |
+| `CLAUDEMINI_INCLUDE` | `gemini\|antigravity` | 必須符合的模型 id 正規表達式 |
+| `CLAUDEMINI_EXCLUDE` | `image\|audio\|...` | 要忽略的模型 id 正規表達式 |
+| `CLAUDEMINI_TOOL_SEARCH` | `true` | 是否啟用延後工具搜尋 |
+| `CLAUDEMINI_DISALLOW` | `Artifact` | 不送出的工具名稱；Gemini schema 修好後可設空字串 |
+
+`claudeop` 使用 OpenCode Go 的專用前綴：
+
+| 變數 | 預設 | 用途 |
+|---|---|---|
+| `CLAUDEOP_BASE_URL` | `https://opencode.ai/zen/go/v1` | OpenCode Go API 位址 |
+| `CLAUDEOP_API_KEY` | *(必填)* | OpenCode Go API key |
+| `CLAUDEOP_MODEL` | `deepseek-v4-pro` | 固定主模型 |
+| `CLAUDEOP_SUBAGENT_MODEL` | *(空，跟隨主模型)* | subagent 模型 |
+| `CLAUDEOP_MAX_CONTEXT_TOKENS` | *(空)* | 已確認的 context / auto-compaction 門檻 |
+| `CLAUDEOP_TOOL_SEARCH` | `false` | 是否啟用延後工具搜尋；需 route 支援 `tool_reference` |
+| `CLAUDEOP_BRIDGE_SCRIPT` | `claudeop_bridge.py` 同目錄 | 非 Claude 模型的轉接程式路徑 |
+| `CLAUDEOP_BRIDGE_PORT` | `0` | localhost bridge port；`0` 代表自動挑選 |
+| `CLAUDEOP_FRONTEND_MODEL` | `claude-sonnet-5` | Claude Code 本地相容 label；bridge 仍使用你選的 OpenCode model |
+| `CLAUDEOP_DEBUG` | *(空)* | 設為 `1` 時顯示 bridge HTTP diagnostics；不顯示 request body 或 key |
+
 模型的優先順序：`--model` > `CLAUDEX_MODEL` > 自動偵測 > `CLAUDEX_FALLBACK_MODEL`
+
+`claudemini` 的優先順序：`--model` > `CLAUDEMINI_MODEL` > 自動偵測 > `CLAUDEMINI_FALLBACK_MODEL`
+
+`claudeop` 的優先順序：`--model` > `CLAUDEOP_MODEL` > `deepseek-v4-pro`
+
+若已確認目前透過 proxy 使用的模型與 route 都支援 1M context，可在 `source` 前設定：
+
+```zsh
+export CLAUDEX_MAX_CONTEXT_TOKENS=1000000
+export CLAUDEX_SUBAGENT_MODEL=gpt-5.6-terra  # 預設值，明列以固定行為
+source ~/.claudex/claudex.sh
+```
+
+`CLAUDEX_MAX_CONTEXT_TOKENS` 只告訴 Claude Code 何時進行 auto-compaction，並不會提高 proxy 或 upstream endpoint 的真實請求上限。若小型 diff 的全新 session 仍收到 `Prompt is too long`，應視為該 route／proxy adapter 的實際限制與宣稱的 1M 不一致，而非提高這個值。
+
+Gemini 路線預設已設成 1M；若實際 route 不支援，請改成已確認的值，並把 subagent 留在同一個 Gemini 模型：
+
+```zsh
+export CLAUDEMINI_MAX_CONTEXT_TOKENS=1000000
+export CLAUDEMINI_SUBAGENT_MODEL=gemini-3.1-pro-preview
+source ~/.claudex/claudemini.sh
+```
+
+`CLAUDEMINI_MAX_CONTEXT_TOKENS` 同樣只影響 auto-compaction，不會替 upstream 增加真實 context 上限。
+
+OpenCode Go 的實際上限依模型與帳戶而定；確認後才設定：
+
+```zsh
+# 只有拿到 OpenCode Go 實際上限後才填入：
+# export CLAUDEOP_MAX_CONTEXT_TOKENS=<confirmed-value>
+export CLAUDEOP_SUBAGENT_MODEL=deepseek-v4-pro
+source ~/.claudex/claudeop.sh
+```
+
+這個值只影響 auto-compaction，不會替 OpenCode Go 增加真實 context 上限。
 
 ---
 
@@ -274,8 +459,10 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer sk-dummy" \
      http://127.0.0.1:8317/v1/models          # 期望 200
 
-# 2. claudex 存在，而且是 function 不是 alias
+# 2. wrappers 存在，而且是 function 不是 alias
 type claudex                                   # 期望 "claudex is a shell function"
+type claudemini                                # 期望 "claudemini is a shell function"
+type claudeop                                  # 期望 "claudeop is a shell function"
 
 # 3. claude 沒有被改寫
 type claude                                    # 期望 "claude is /path/to/claude"（不是 alias/function）
@@ -283,8 +470,14 @@ type claude                                    # 期望 "claude is /path/to/clau
 # 4. 環境變數沒有外洩到 shell（全部應為空）
 echo "[$ANTHROPIC_BASE_URL][$ANTHROPIC_AUTH_TOKEN][$CLAUDE_CODE_SUBAGENT_MODEL]"
 
-# 5. 端到端
+# 5. 端到端：依你設定的 route 各跑一次
 claudex --print "Reply with exactly: OK"
+claudemini --print "Reply with exactly: OK"
+
+# 6. OpenCode Go（先設定 CLAUDEOP_API_KEY）
+claudeop --models                       # 應包含 deepseek-v4-pro 等模型
+claudeop --print "Reply with exactly: OK"  # Claude direct route
+claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"  # bridge route
 ```
 
 ---
@@ -294,8 +487,32 @@ claudex --print "Reply with exactly: OK"
 **`claudex: cannot reach CLIProxyAPI`**
 服務沒跑。`brew services restart cliproxyapi` / `systemctl --user restart cli-proxy-api`。
 
+**`claudeop: set CLAUDEOP_API_KEY to your OpenCode Go API key`**
+目前 shell 沒有 OpenCode Go key。先設定 `CLAUDEOP_API_KEY`；不要把它寫進 repo 或貼到聊天視窗。
+
+**`claudeop` 回 401 / `Missing API key`**
+確認使用的是 OpenCode Go key，不是 Anthropic key；確認 `CLAUDEOP_BASE_URL` 保持 `https://opencode.ai/zen/go/v1`。Go route 使用 `Authorization: Bearer`；wrapper 會在該次子程序內清空 `ANTHROPIC_API_KEY`、改用 `ANTHROPIC_AUTH_TOKEN`，不需要登出 claude.ai。
+
+**`claudeop` 回 model 不存在或模型清單沒有該 id**
+先跑 `claudeop --models`，再用清單中實際出現的 id 設定 `CLAUDEOP_MODEL` 或傳 `--model`。OpenCode Go 的模型清單會變動，不要自行拼接模型名稱。
+
+**仍看到 `[claude-code:unrecognized_model]` 或只有 generic model error**
+重新執行 `source ~/.claudex/claudeop.sh`。非 Claude route 會用 `CLAUDEOP_FRONTEND_MODEL`（預設 `claude-sonnet-5`）作為 Claude Code 的本地 label，再由 bridge 轉送實際 OpenCode model。若仍失敗，可用 `CLAUDEOP_DEBUG=1 claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"` 顯示不含 request body/key 的 bridge diagnostics。
+
+**`claudeop: bridge script not found`**
+把 `claudeop.sh` 和 `claudeop_bridge.py` 放在同一個目錄，或設定 `CLAUDEOP_BRIDGE_SCRIPT=/absolute/path/to/claudeop_bridge.py`。
+
+**DeepSeek 回 400、工具呼叫失敗或輸出格式不完整**
+目前 bridge 轉換文字、圖片 URL/base64、工具宣告、tool call 和串流；Anthropic 特殊 blocks、文件、部分 server tools 仍可能不相容。先用簡單文字任務確認 route，再逐步加入工具。
+
 **模型清單是空的（`{"data":[],"object":"list"}`）**
-OAuth 憑證過期或沒載入。重跑 `cliproxyapi -codex-login`，**然後重啟服務**。
+OAuth 憑證過期或沒載入。重跑對應的登入指令（GPT 用 `cliproxyapi -codex-login`，Gemini 用 `cliproxyapi -antigravity-login`），**然後重啟服務**。
+
+**`claudemini: the proxy serves no Gemini model.`**
+Proxy 本身有回應，但 `/v1/models` 沒有符合 `CLAUDEMINI_INCLUDE` 的 id。先跑 `claudemini --models-all` 看實際 id；若還沒登入，執行 `cliproxyapi -antigravity-login` 後重啟服務。
+
+**Gemini route 回 400，錯誤提到 `query.where` / `prefixItems`**
+這是目前 Gemini function-calling validator 不接受 Artifact 工具 schema。保留預設的 `CLAUDEMINI_DISALLOW=Artifact`；只有確認 route 已支援該 schema 後才設成空字串。
 
 **`"gpt-5.x-xxx" is not a model this version of Claude Code recognizes`**
 正常，不影響運作。Claude Code 不認識這個型號，所以假設 200k 上下文並據此 auto-compact。
@@ -376,6 +593,7 @@ CLAUDE_CODE_SESSION_NAME=worker claudex    # 工作方
 - `sk-dummy` 只是本機用的佔位金鑰。**前提是 `host` 設成 `127.0.0.1`** —— 預設值 `""` 會綁所有介面，
   等於把你的 ChatGPT 帳號開放給同網段任何人使用。
 - `~/.cli-proxy-api/` 裡是真的 OAuth 憑證。不要進版控、不要分享、不要貼到聊天視窗。
+- `CLAUDEOP_API_KEY` 是 OpenCode Go 的付費 API key。不要進版控、不要分享、不要貼到聊天視窗；wrapper 只在單次 `claudeop` 執行時注入。
 - 這個 repo 不包含任何憑證。
 
 ---
@@ -405,5 +623,6 @@ rm -rf ~/.cli-proxy-api
 | Linux | ⚠️ 安裝指令引自官方文件，未實機驗證 |
 | Windows / PowerShell | ⚠️ `claudex.ps1` **未執行過**，僅照邏輯移植 |
 | Docker | ⚠️ 指令引自官方文件，未實機驗證 |
+| OpenCode Go / `claudeop` | ⚠️ `/v1/models` endpoint 已確認可連線；需要使用者 API key 才能做端到端驗證 |
 
-歡迎回報，尤其是 Linux 和 Windows 的實際結果。
+歡迎回報，尤其是 Linux、Windows 和 OpenCode Go 的實際結果。
