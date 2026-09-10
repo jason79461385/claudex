@@ -9,21 +9,23 @@
 
 ## 這是什麼
 
-裝完之後你會有兩個指令：
+裝完之後你會有三個指令：
 
 | 指令 | 走哪裡 | 用什麼模型 |
 |---|---|---|
 | `claude` | Anthropic 官方，**完全不變** | 你原本的 Claude 模型 |
 | `claudex` | 本機 CLIProxyAPI (`127.0.0.1:8317`) | 目前最新的 GPT 模型，**自動偵測** |
+| `claudemini` | 同一個 CLIProxyAPI | 目前最新的 Gemini 模型，**自動偵測** |
 
-`claudex` 是一個 shell function，六個環境變數只在它執行的那一瞬間存在，不會外洩到你的 shell，也不會讓 `claude` 被永久導向 proxy。
+`claudex` 和 `claudemini` 都是 shell function。它們只在執行該次指令時注入 proxy 環境變數，不會外洩到你的 shell，也不會讓 `claude` 被永久導向 proxy。
 
 ## 需求
 
 - **Claude Code** 已安裝（跨 session 溝通功能需要 2.1.228 以上，見〈跨 session 溝通〉）
-- **Python 3**（`claudex` 用它解析模型清單；macOS/Linux 通常內建）
-- **一個可用的 ChatGPT / Codex 訂閱帳號**（OAuth 登入用）
-- macOS 需要 Homebrew；Linux 用官方安裝腳本；Windows 用 release 執行檔
+- **Python 3**（兩個 wrapper 都用它解析模型清單；macOS/Linux 通常內建）
+- 使用 `claudex`：一個可用的 ChatGPT / Codex 憑證（OAuth 登入用）
+- 使用 `claudemini`：CLIProxyAPI 支援的 Gemini 憑證（Antigravity OAuth 或 API key）
+- macOS 需要 Homebrew；Linux 用官方安裝腳本；Windows 用 release 執行檔（Windows 目前只提供 `claudex.ps1`）
 
 ---
 
@@ -96,7 +98,9 @@ systemctl --user start cli-proxy-api
 cliproxyapi
 ```
 
-### 步驟 4：Codex OAuth 登入
+### 步驟 4：登入你要使用的模型服務
+
+GPT 路線使用 Codex OAuth：
 
 ```bash
 cliproxyapi -codex-login
@@ -107,6 +111,14 @@ cliproxyapi -codex-login
 ```bash
 cliproxyapi -codex-device-login
 ```
+
+Gemini 路線使用 Antigravity OAuth：
+
+```bash
+cliproxyapi -antigravity-login
+```
+
+也可以在 CLIProxyAPI 設定檔放入 `gemini-api-key`，不用 OAuth。兩條路線可以同時設定；之後由 `claudex` 或 `claudemini` 選擇要走哪一條。
 
 憑證會存到 `~/.cli-proxy-api/`。**這個目錄不要分享、不要進版控。**
 
@@ -129,27 +141,40 @@ curl -s -H "Authorization: Bearer sk-dummy" http://127.0.0.1:8317/v1/models
 
 清單如果是**空的**，代表 OAuth 憑證沒載入 —— 回到步驟 4 重登再重啟。
 
-### 步驟 6：安裝 claudex
+### 步驟 6：手動放置 wrapper
+
+這個 repo 不需要 `npm install`、編譯或安裝 daemon；兩個 `.sh` 檔本身就是 wrapper。你可以選一種方式取得檔案：
+
+**方式 A：clone repo（推薦）**
 
 ```bash
 git clone https://github.com/jason79461385/claudex.git ~/.claudex
+```
+
+**方式 B：repo 已經在本機**
+
+```bash
+mkdir -p ~/.claudex
+cp /path/to/claudex/claudex.sh ~/.claudex/
+cp /path/to/claudex/claudemini.sh ~/.claudex/
 ```
 
 **zsh**（macOS 預設）— 加到 `~/.zshrc`：
 
 ```zsh
 source ~/.claudex/claudex.sh
+source ~/.claudex/claudemini.sh
 ```
 
-**bash** — 加到 `~/.bashrc`，內容同上。
+只需要 GPT 時可以只 source `claudex.sh`；只需要 Gemini 時可以只 source `claudemini.sh`。**bash** — 將相同內容加到 `~/.bashrc`。
 
-**PowerShell** — 加到 `$PROFILE`：
+**PowerShell** — 目前提供已移植的 `claudex.ps1`，加到 `$PROFILE`：
 
 ```powershell
 . $HOME\.claudex\claudex.ps1
 ```
 
-然後 `source ~/.zshrc`（或開新視窗）。
+然後 `source ~/.zshrc` / `source ~/.bashrc`，或關掉再開一個 PowerShell 視窗。wrapper 不需要 `chmod +x`，因為它是用 `source` / dot-source 載入的。
 
 ---
 
@@ -157,9 +182,14 @@ source ~/.claudex/claudex.sh
 
 ```bash
 claudex                              # 自動用最新的 GPT 模型
-claudex --models                     # 列出可用的對話模型，標出會用哪一個
+claudex --models                     # 列出可用的 GPT 對話模型
 claudex --models-all                 # 列出 proxy 上的全部模型，含被濾掉的
 claudex --print "hello"              # 任何 Claude Code 參數都能照傳
+
+claudemini                           # 自動用最新的 Gemini 模型
+claudemini --models                  # 列出可用的 Gemini 對話模型
+claudemini --models-all              # 連同非 Gemini 模型一起列出
+claudemini --print "hello"           # 使用 Gemini route 執行
 
 claude                               # 原本的 Claude Code，完全不受影響
 ```
@@ -182,6 +212,21 @@ claude                               # 原本的 Claude Code，完全不受影�
   gpt-image-2              2024-01-01   (not a chat model, skipped)
 ```
 
+### `claudemini` 的特別行為
+
+`claudemini` 和 `claudex` 共用同一個 proxy，但不會把「全站最新模型」誤選成 GPT：
+
+1. 先查 `/v1/models`。
+2. 只保留符合 `CLAUDEMINI_INCLUDE` 的 id（預設 `gemini|antigravity`）。
+3. 再排除 image、audio、review 等非對話模型。
+4. Gemini route 常回傳 `created=0`，所以改用模型 id 裡的版本號排序；無版本號的 id 放最後。
+
+Gemini 的 function-calling 目前可能無法驗證 `query.where` 的 tuple schema，因此 `claudemini` 預設把 `Artifact` 從送出的工具宣告中移除。這不是把權限藏起來而已，而是避免整個請求在產生文字前就因 schema 400；確認你的 Gemini route 已支援 `prefixItems` 後，才設定：
+
+```bash
+export CLAUDEMINI_DISALLOW=""
+```
+
 ### 換模型
 
 三種範圍，看你要影響多久：
@@ -200,6 +245,22 @@ echo 'export CLAUDEX_MODEL=gpt-5.6-sol' >> ~/.zshrc && source ~/.zshrc
 # 取消固定，改回自動選最新
 unset CLAUDEX_MODEL          # 若已寫進 ~/.zshrc，要把那行刪掉
 ```
+
+`claudemini` 使用同樣的三種方式，只是變數和模型名改成 Gemini：
+
+```bash
+# 只有這一次
+claudemini --model gemini-3.1-pro-preview
+
+# 固定目前終端機視窗
+export CLAUDEMINI_MODEL=gemini-3.1-pro-preview
+claudemini
+
+# 取消固定，恢復自動挑選
+unset CLAUDEMINI_MODEL
+```
+
+顯式傳入的 `--model` / `-m` 優先於環境變數；可用的實際 id 先用 `claudex --models` 或 `claudemini --models` 查。
 
 ### 在 session 內換模型
 
@@ -258,12 +319,52 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 |---|---|---|
 | `CLAUDEX_BASE_URL` | `http://127.0.0.1:8317` | proxy 位址 |
 | `CLAUDEX_API_KEY` | `sk-dummy` | proxy 金鑰，要和 `api-keys` 一致 |
-| `CLAUDEX_MODEL` | *(空)* | 固定模型，設了就跳過自動偵測 |
+| `CLAUDEX_MODEL` | *(空)* | 固定主模型，設了就跳過自動偵測 |
+| `CLAUDEX_SUBAGENT_MODEL` | `gpt-5.6-terra` | 所有新建 subagent 使用的模型；不隨主模型自動切換 |
+| `CLAUDEX_MAX_CONTEXT_TOKENS` | *(空)* | 已確認的模型 context window；設定後傳給 Claude Code 作為 auto-compaction 門檻 |
 | `CLAUDEX_FALLBACK_MODEL` | `gpt-5.6-sol` | proxy 連不上時的保底 |
 | `CLAUDEX_EXCLUDE` | `image\|audio\|tts\|...` | 要忽略的模型 id 正規表達式 |
 | `CLAUDEX_TOOL_SEARCH` | `true` | 見〈ENABLE_TOOL_SEARCH〉 |
 
+`claudemini` 使用另一組前綴，避免兩條路線互相污染：
+
+| 變數 | 預設 | 用途 |
+|---|---|---|
+| `CLAUDEMINI_BASE_URL` | `http://127.0.0.1:8317` | proxy 位址 |
+| `CLAUDEMINI_API_KEY` | `sk-dummy` | proxy 金鑰 |
+| `CLAUDEMINI_MODEL` | *(空)* | 固定 Gemini 主模型 |
+| `CLAUDEMINI_SUBAGENT_MODEL` | *(空，跟隨主模型)* | subagent 模型 |
+| `CLAUDEMINI_SUBAGENT_FORCE` | `1` | 強制 subagent 留在 Gemini route |
+| `CLAUDEMINI_MAX_CONTEXT_TOKENS` | `1000000` | 傳給 Claude Code 的 context / auto-compaction 門檻 |
+| `CLAUDEMINI_FALLBACK_MODEL` | `gemini-3.1-pro-preview` | proxy 連不上或沒有可選模型時的保底 |
+| `CLAUDEMINI_INCLUDE` | `gemini\|antigravity` | 必須符合的模型 id 正規表達式 |
+| `CLAUDEMINI_EXCLUDE` | `image\|audio\|...` | 要忽略的模型 id 正規表達式 |
+| `CLAUDEMINI_TOOL_SEARCH` | `true` | 是否啟用延後工具搜尋 |
+| `CLAUDEMINI_DISALLOW` | `Artifact` | 不送出的工具名稱；Gemini schema 修好後可設空字串 |
+
 模型的優先順序：`--model` > `CLAUDEX_MODEL` > 自動偵測 > `CLAUDEX_FALLBACK_MODEL`
+
+`claudemini` 的優先順序：`--model` > `CLAUDEMINI_MODEL` > 自動偵測 > `CLAUDEMINI_FALLBACK_MODEL`
+
+若已確認目前透過 proxy 使用的模型與 route 都支援 1M context，可在 `source` 前設定：
+
+```zsh
+export CLAUDEX_MAX_CONTEXT_TOKENS=1000000
+export CLAUDEX_SUBAGENT_MODEL=gpt-5.6-terra  # 預設值，明列以固定行為
+source ~/.claudex/claudex.sh
+```
+
+`CLAUDEX_MAX_CONTEXT_TOKENS` 只告訴 Claude Code 何時進行 auto-compaction，並不會提高 proxy 或 upstream endpoint 的真實請求上限。若小型 diff 的全新 session 仍收到 `Prompt is too long`，應視為該 route／proxy adapter 的實際限制與宣稱的 1M 不一致，而非提高這個值。
+
+Gemini 路線預設已設成 1M；若實際 route 不支援，請改成已確認的值，並把 subagent 留在同一個 Gemini 模型：
+
+```zsh
+export CLAUDEMINI_MAX_CONTEXT_TOKENS=1000000
+export CLAUDEMINI_SUBAGENT_MODEL=gemini-3.1-pro-preview
+source ~/.claudex/claudemini.sh
+```
+
+`CLAUDEMINI_MAX_CONTEXT_TOKENS` 同樣只影響 auto-compaction，不會替 upstream 增加真實 context 上限。
 
 ---
 
@@ -274,8 +375,9 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 curl -s -o /dev/null -w "%{http_code}\n" -H "Authorization: Bearer sk-dummy" \
      http://127.0.0.1:8317/v1/models          # 期望 200
 
-# 2. claudex 存在，而且是 function 不是 alias
+# 2. wrappers 存在，而且是 function 不是 alias
 type claudex                                   # 期望 "claudex is a shell function"
+type claudemini                                # 期望 "claudemini is a shell function"
 
 # 3. claude 沒有被改寫
 type claude                                    # 期望 "claude is /path/to/claude"（不是 alias/function）
@@ -283,8 +385,9 @@ type claude                                    # 期望 "claude is /path/to/clau
 # 4. 環境變數沒有外洩到 shell（全部應為空）
 echo "[$ANTHROPIC_BASE_URL][$ANTHROPIC_AUTH_TOKEN][$CLAUDE_CODE_SUBAGENT_MODEL]"
 
-# 5. 端到端
+# 5. 端到端：依你設定的 route 各跑一次
 claudex --print "Reply with exactly: OK"
+claudemini --print "Reply with exactly: OK"
 ```
 
 ---
@@ -295,7 +398,13 @@ claudex --print "Reply with exactly: OK"
 服務沒跑。`brew services restart cliproxyapi` / `systemctl --user restart cli-proxy-api`。
 
 **模型清單是空的（`{"data":[],"object":"list"}`）**
-OAuth 憑證過期或沒載入。重跑 `cliproxyapi -codex-login`，**然後重啟服務**。
+OAuth 憑證過期或沒載入。重跑對應的登入指令（GPT 用 `cliproxyapi -codex-login`，Gemini 用 `cliproxyapi -antigravity-login`），**然後重啟服務**。
+
+**`claudemini: the proxy serves no Gemini model.`**
+Proxy 本身有回應，但 `/v1/models` 沒有符合 `CLAUDEMINI_INCLUDE` 的 id。先跑 `claudemini --models-all` 看實際 id；若還沒登入，執行 `cliproxyapi -antigravity-login` 後重啟服務。
+
+**Gemini route 回 400，錯誤提到 `query.where` / `prefixItems`**
+這是目前 Gemini function-calling validator 不接受 Artifact 工具 schema。保留預設的 `CLAUDEMINI_DISALLOW=Artifact`；只有確認 route 已支援該 schema 後才設成空字串。
 
 **`"gpt-5.x-xxx" is not a model this version of Claude Code recognizes`**
 正常，不影響運作。Claude Code 不認識這個型號，所以假設 200k 上下文並據此 auto-compact。

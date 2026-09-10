@@ -6,13 +6,17 @@
 # Environment knobs (all optional):
 #   CLAUDEX_BASE_URL        proxy address           (default http://127.0.0.1:8317)
 #   CLAUDEX_API_KEY         proxy api key           (default sk-dummy)
-#   CLAUDEX_MODEL           pin a model, skips auto-detection
+#   CLAUDEX_MODEL           pin the primary model, skips auto-detection
+#   CLAUDEX_SUBAGENT_MODEL  model for spawned agents (default gpt-5.6-terra)
+#   CLAUDEX_MAX_CONTEXT_TOKENS known context window; unset preserves Claude Code's default
 #   CLAUDEX_FALLBACK_MODEL  used when the proxy is unreachable (default gpt-5.6-sol)
 #   CLAUDEX_EXCLUDE         regex of model ids to ignore
 #   CLAUDEX_TOOL_SEARCH     true|false              (default true)
 
 : "${CLAUDEX_BASE_URL:=http://127.0.0.1:8317}"
 : "${CLAUDEX_API_KEY:=sk-dummy}"
+: "${CLAUDEX_SUBAGENT_MODEL:=gpt-5.6-terra}"
+: "${CLAUDEX_MAX_CONTEXT_TOKENS:=${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}}"
 : "${CLAUDEX_FALLBACK_MODEL:=gpt-5.6-sol}"
 : "${CLAUDEX_EXCLUDE:=image|audio|tts|whisper|transcribe|embed|moderation|realtime|review|search}"
 : "${CLAUDEX_TOOL_SEARCH:=true}"
@@ -86,7 +90,8 @@ claudex() {
   if [ -n "$model" ]; then
     ANTHROPIC_BASE_URL="$CLAUDEX_BASE_URL" \
     ANTHROPIC_AUTH_TOKEN="$CLAUDEX_API_KEY" \
-    CLAUDE_CODE_SUBAGENT_MODEL="$model" \
+    CLAUDE_CODE_SUBAGENT_MODEL="$CLAUDEX_SUBAGENT_MODEL" \
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CLAUDEX_MAX_CONTEXT_TOKENS" \
     CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1 \
     CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
     ENABLE_TOOL_SEARCH="$CLAUDEX_TOOL_SEARCH" \
@@ -95,7 +100,8 @@ claudex() {
     model="${CLAUDEX_MODEL:-$(__claudex_pick)}"
     ANTHROPIC_BASE_URL="$CLAUDEX_BASE_URL" \
     ANTHROPIC_AUTH_TOKEN="$CLAUDEX_API_KEY" \
-    CLAUDE_CODE_SUBAGENT_MODEL="$model" \
+    CLAUDE_CODE_SUBAGENT_MODEL="$CLAUDEX_SUBAGENT_MODEL" \
+    CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CLAUDEX_MAX_CONTEXT_TOKENS" \
     CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1 \
     CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
     ENABLE_TOOL_SEARCH="$CLAUDEX_TOOL_SEARCH" \
