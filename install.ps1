@@ -226,6 +226,23 @@ function Ensure-ProxyConfig {
   return $true
 }
 
+function Write-ProxyLauncher {
+  # Writes a small launcher that starts the console exe with no visible
+  # window and waits, so the scheduled task stays Running and restarts
+  # the proxy on failure. Returns the launcher path.
+  param([string]$Exe, [string]$Config, [string]$ProxyDir)
+  $launcher = Join-Path $ProxyDir 'run-hidden.ps1'
+  @(
+    '# Managed by claudex install.ps1 - do not edit by hand.',
+    '# Launches CLIProxyAPI with no visible window and waits, so the',
+    '# scheduled task stays Running and restarts it on failure.',
+    "`$p = Start-Process -FilePath '$Exe' -ArgumentList '-config','$Config' -WindowStyle Hidden -PassThru",
+    '$p.WaitForExit()',
+    'exit $p.ExitCode'
+  ) | Set-Content -Path $launcher -Encoding utf8
+  return $launcher
+}
+
 function Enable-ProxyAutostart {
   # Registers a logon scheduled task (Windows only). Returns $true when the task exists afterwards.
   param([string]$Exe, [string]$Config)
@@ -235,20 +252,24 @@ function Enable-ProxyAutostart {
     return $false
   }
   $existing = Get-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
-  # Background launch: run the console exe via a hidden powershell so no
-  # console window pops up (a bare exe action would occupy a visible window).
+  # Background launch: hidden powershell runs a launcher script that starts
+  # the console exe via Start-Process -WindowStyle Hidden, so no console
+  # window ever appears (a bare exe action would occupy a visible window).
+  $proxyDir = Split-Path $Config -Parent
+  $launcher = Write-ProxyLauncher -Exe $Exe -Config $Config -ProxyDir $proxyDir
   $pwsh = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
   if (Get-Command powershell -ErrorAction SilentlyContinue) {
     $pwsh = (Get-Command powershell -ErrorAction SilentlyContinue).Source
   }
-  $action = New-ScheduledTaskAction -Execute $pwsh -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command `"& '$Exe' -config '$Config'`""
+  $action = New-ScheduledTaskAction -Execute $pwsh -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$launcher`""
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -Hidden
   if ($existing) {
-    # Migrate tasks registered by older installers (foreground exe action).
-    $curArgs = @($existing.Actions | ForEach-Object { $_.Arguments })
-    if (($existing.Actions.Execute -notlike '*powershell*') -or ($curArgs -notlike '*-WindowStyle Hidden*')) {
+    # Migrate tasks registered by older installers (foreground exe or
+    # inline hidden-command actions).
+    $curArgs = @($existing.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" })
+    if ($curArgs -notlike '*run-hidden.ps1*') {
       Stop-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
       Set-ScheduledTask -TaskName 'CLIProxyAPI' -Action $action -Trigger $trigger -Settings $settings | Out-Null
       Start-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
