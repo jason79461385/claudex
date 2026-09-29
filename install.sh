@@ -493,7 +493,12 @@ if [ -n "$UNINSTALL" ]; then
   fi
   if [ -n "$REMOVE_FILES" ]; then
     for r in $ALL_ROUTES; do
-      [ -d "${DEST}/${r}" ] && rm -rf "${DEST}/${r}" && echo "install.sh: removed ${DEST}/${r}"
+      # Never gut the repo checkout itself when uninstalling from inside it.
+      if [ -e "${DEST}/${r}" ] && [ "${SRC}/${r}" -ef "${DEST}/${r}" ]; then
+        echo "install.sh: keeping ${DEST}/${r} (it is the repo checkout itself)"
+      elif [ -d "${DEST}/${r}" ]; then
+        rm -rf "${DEST}/${r}" && echo "install.sh: removed ${DEST}/${r}"
+      fi
     done
     rmdir "$DEST" 2>/dev/null && echo "install.sh: removed empty ${DEST}" || true
   else
@@ -507,9 +512,16 @@ fi
 echo "install.sh: installing routes [$ROUTES] into ${DEST} ..."
 mkdir -p "$DEST"
 for r in $ROUTES; do
-  rm -rf "${DEST}/${r}"
-  cp -R "${SRC}/${r}" "${DEST}/${r}"
-  echo "  copied ${r}/"
+  # When installing into the repo checkout itself (the default: clone to
+  # ~/.claudex, run its install.sh), source and destination are the same
+  # folders — do NOT delete-then-copy, just leave them in place.
+  if [ -e "${DEST}/${r}" ] && [ "${SRC}/${r}" -ef "${DEST}/${r}" ]; then
+    echo "  ${r}/ already in place"
+  else
+    rm -rf "${DEST}/${r}"
+    cp -R "${SRC}/${r}" "${DEST}/${r}"
+    echo "  copied ${r}/"
+  fi
 done
 
 # Syntax-check what we installed.

@@ -302,6 +302,12 @@ try {
     }
   }
 
+  # When installing into the repo checkout itself (the default: clone to
+  # $HOME\.claudex, run its install.ps1), source and destination are the
+  # same folders — never delete-then-copy, and never remove them on uninstall.
+  $sameRoot = ([System.IO.Path]::GetFullPath($srcDir).TrimEnd('\', '/') -eq `
+               [System.IO.Path]::GetFullPath($Dir).TrimEnd('\', '/'))
+
   if ($Uninstall) {
     if (-not $NoProfile) {
       if (Remove-ProfileBlock $PROFILE) {
@@ -313,6 +319,10 @@ try {
     if ($RemoveFiles) {
       foreach ($r in $AllRoutes) {
         $p = Join-Path $Dir $r
+        if ($sameRoot) {
+          Write-Host "install.ps1: keeping $p (it is the repo checkout itself)"
+          continue
+        }
         if (Test-Path $p) { Remove-Item -Recurse -Force $p; Write-Host "install.ps1: removed $p" }
       }
       if ((Test-Path $Dir) -and @(Get-ChildItem $Dir -Force).Count -eq 0) {
@@ -333,9 +343,14 @@ try {
   Write-Host "install.ps1: installing routes [$($Routes -join ', ')] into $Dir ..."
   if (-not (Test-Path $Dir)) { New-Item -ItemType Directory -Path $Dir -Force | Out-Null }
   foreach ($r in $Routes) {
+    $src = Join-Path $srcDir $r
     $dest = Join-Path $Dir $r
+    if ($sameRoot) {
+      Write-Host "  $r\ already in place"
+      continue
+    }
     if (Test-Path $dest) { Remove-Item -Recurse -Force $dest }
-    Copy-Item (Join-Path $srcDir $r) $dest -Recurse -Force
+    Copy-Item $src $dest -Recurse -Force
     Write-Host "  copied $r\"
   }
 
