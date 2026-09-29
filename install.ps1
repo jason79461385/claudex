@@ -256,6 +256,10 @@ function Enable-ProxyAutostart {
     } else {
       Write-Host 'install.ps1: scheduled task CLIProxyAPI already exists — leaving it alone'
     }
+    if ((Get-ScheduledTask -TaskName 'CLIProxyAPI').State -ne 'Running') {
+      Start-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
+      Write-Host 'install.ps1: started existing CLIProxyAPI task'
+    }
     return $true
   }
   Register-ScheduledTask -TaskName 'CLIProxyAPI' -Action $action -Trigger $trigger `
