@@ -235,14 +235,29 @@ function Enable-ProxyAutostart {
     return $false
   }
   $existing = Get-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
-  if ($existing) {
-    Write-Host 'install.ps1: scheduled task CLIProxyAPI already exists — leaving it alone'
-    return $true
+  # Background launch: run the console exe via a hidden powershell so no
+  # console window pops up (a bare exe action would occupy a visible window).
+  $pwsh = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
+  if (Get-Command powershell -ErrorAction SilentlyContinue) {
+    $pwsh = (Get-Command powershell -ErrorAction SilentlyContinue).Source
   }
-  $action = New-ScheduledTaskAction -Execute $Exe -Argument "-config `"$Config`""
+  $action = New-ScheduledTaskAction -Execute $pwsh -Argument "-WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -Command `"& '$Exe' -config '$Config'`""
   $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
   $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -Hidden
+  if ($existing) {
+    # Migrate tasks registered by older installers (foreground exe action).
+    $curArgs = @($existing.Actions | ForEach-Object { $_.Arguments })
+    if (($existing.Actions.Execute -notlike '*powershell*') -or ($curArgs -notlike '*-WindowStyle Hidden*')) {
+      Stop-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
+      Set-ScheduledTask -TaskName 'CLIProxyAPI' -Action $action -Trigger $trigger -Settings $settings | Out-Null
+      Start-ScheduledTask -TaskName 'CLIProxyAPI' -ErrorAction SilentlyContinue
+      Write-Host 'install.ps1: migrated CLIProxyAPI task to hidden background launch'
+    } else {
+      Write-Host 'install.ps1: scheduled task CLIProxyAPI already exists — leaving it alone'
+    }
+    return $true
+  }
   Register-ScheduledTask -TaskName 'CLIProxyAPI' -Action $action -Trigger $trigger `
     -Settings $settings -Description 'CLIProxyAPI local AI proxy (managed by claudex installer)' -Force | Out-Null
   Start-ScheduledTask -TaskName 'CLIProxyAPI'

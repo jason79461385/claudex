@@ -116,7 +116,7 @@ cliproxyapi
 | macOS（無 brew，managed 安裝） | `~/Library/LaunchAgents/com.claudex.cliproxyapi.plist` |
 | Linux（managed 安裝） | user systemd unit `claudex-proxy.service`（登入自動啟動；無登入開機也要跑再加 `sudo loginctl enable-linger <user>`） |
 | Linux（沿用既有安裝） | 沿用該安裝自帶的 service；裝完記得 `enable` |
-| Windows | 排程工作 `CLIProxyAPI`（登入自動啟動，失敗自動重試） |
+| Windows | 排程工作 `CLIProxyAPI`（登入自動啟動，失敗自動重試；經隱藏 PowerShell 背景執行，不佔視窗） |
 
 登入（步驟 4）之後**一定要重啟服務**才會載入新憑證，各平台指令見步驟 4 末尾。
 
