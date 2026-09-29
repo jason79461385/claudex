@@ -150,6 +150,7 @@ cliproxyapi -antigravity-login
 > & $HOME\.claudex\login.ps1 codex          # GPT 路線
 > & $HOME\.claudex\login.ps1 antigravity    # Gemini 路線
 > & $HOME\.claudex\login.ps1 codex-device   # 無瀏覽器時用 device flow，不需要 callback port
+> & $HOME\.claudex\login.ps1 opencode       # 輸入 OpenCode Go API key，驗證後永久存到使用者環境變數
 > ```
 >
 > macOS/Linux：`~/.claudex/login.sh antigravity`。手動登入時記得加 `-config` 指到正確設定檔，

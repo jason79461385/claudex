@@ -13,6 +13,7 @@
   & $HOME\.claudex\login.ps1 antigravity
   & $HOME\.claudex\login.ps1 codex
   & $HOME\.claudex\login.ps1 codex-device
+  & $HOME\.claudex\login.ps1 opencode     # prompt for the API key, verify, save to User env
 #>
 [CmdletBinding()]
 param(
@@ -56,6 +57,38 @@ function Find-FreePort {
 
 $key = $Provider.ToLower().TrimStart('-')
 $deviceFlow = $false
+if ($key -eq 'opencode' -or $key -eq 'opencode-login') {
+  # OpenCode Go uses an API key, not OAuth: prompt (masked), verify it
+  # against /models, then persist to the User environment + this session.
+  $plain = $null
+  while ($true) {
+    $sec = Read-Host 'OpenCode Go API key (paste, Enter to save; empty aborts)' -AsSecureString
+    if ($sec.Length -eq 0) { Write-Host 'login.ps1: cancelled.'; exit 0 }
+    $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec)
+    try {
+      $plain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr)
+    } finally {
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr)
+    }
+    if ([string]::IsNullOrWhiteSpace($plain)) { Write-Warning 'login.ps1: empty key, try again.'; continue }
+    $base = if ($env:CLAUDEOP_BASE_URL) { $env:CLAUDEOP_BASE_URL.TrimEnd('/') } else { 'https://opencode.ai/zen/go/v1' }
+    try {
+      $resp = Invoke-RestMethod -Uri "$base/models" -Headers @{ Authorization = "Bearer $plain" } -TimeoutSec 20
+      $n = if ($resp.data) { @($resp.data).Count } else { 0 }
+      Write-Host "login.ps1: key verified ($n models in catalogue)."
+      break
+    } catch {
+      Write-Warning "login.ps1: verification failed: $($_.Exception.Message)"
+      $yn = Read-Host 'Save it anyway? [y/N]'
+      if ($yn -eq 'y' -or $yn -eq 'Y') { break }
+    }
+  }
+  [Environment]::SetEnvironmentVariable('CLAUDEOP_API_KEY', $plain, 'User')
+  $env:CLAUDEOP_API_KEY = $plain
+  $plain = $null
+  Write-Host 'login.ps1: saved CLAUDEOP_API_KEY to User environment + this session; verify with: claudeop --models'
+  exit 0
+}
 if ($key -eq 'codex-device' -or $key -eq 'codex-device-login') {
   $flag = '-codex-device-login'
   $deviceFlow = $true

@@ -5,6 +5,7 @@
 #   ~/.claudex/login.sh antigravity
 #   ~/.claudex/login.sh codex
 #   ~/.claudex/login.sh codex-device   # device flow, needs no callback port
+#   ~/.claudex/login.sh opencode       # prompt for the API key, verify, append to your rc file
 #
 # Tests whether the provider default callback port can be bound on
 # 127.0.0.1 and falls back to a free port via -oauth-callback-port.
@@ -16,7 +17,7 @@ PROVIDER="${1:-}"
 CONFIG="${CLAUDEX_PROXY_CONFIG:-${HOME}/.claudex/proxy/config.yaml}"
 EXE="${CLAUDEX_PROXY_EXE:-}"
 
-usage() { echo "usage: login.sh <antigravity|codex|codex-device|<provider>[-login]> [--no-browser]" >&2; exit 2; }
+usage() { echo "usage: login.sh <antigravity|codex|codex-device|opencode|<provider>[-login]> [--no-browser]" >&2; exit 2; }
 [ -n "$PROVIDER" ] || usage
 command -v python3 >/dev/null 2>&1 || { echo "login.sh: needs 'python3' on PATH" >&2; exit 1; }
 
@@ -29,6 +30,49 @@ elif [ "${key%-login}" != "$key" ]; then
   flag="-$key"
 else
   flag="-$key-login"
+fi
+
+# OpenCode Go uses an API key, not OAuth: prompt (hidden), verify it
+# against /models, then persist to the rc file for future shells.
+if [ "$key" = "opencode" ] || [ "$key" = "opencode-login" ]; then
+  base="${CLAUDEOP_BASE_URL:-https://opencode.ai/zen/go/v1}"
+  base="${base%/}"
+  while true; do
+    printf 'OpenCode Go API key (empty aborts): '
+    IFS= read -r -s apikey; printf '\n'
+    [ -n "$apikey" ] || { echo "login.sh: cancelled."; exit 0; }
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -H "Authorization: Bearer $apikey" "$base/models" 2>/dev/null || true)"
+    if [ "$code" = "200" ]; then
+      n="$(curl -s --max-time 20 -H "Authorization: Bearer $apikey" "$base/models" 2>/dev/null | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("data", [])))' 2>/dev/null || echo '?')"
+      echo "login.sh: key verified ($n models in catalogue)."
+      break
+    fi
+    echo "login.sh: verification failed (HTTP $code)." >&2
+    printf 'Save it anyway? [y/N] '
+    IFS= read -r yn
+    case "$yn" in y|Y) break ;; *) continue ;; esac
+  done
+  case "${SHELL:-}" in *bash*) rc="${HOME}/.bashrc" ;; *) rc="${HOME}/.zshrc" ;; esac
+  [ -f "$rc" ] || touch "$rc"
+  cp "$rc" "$rc.bak.$(date +%Y%m%d-%H%M%S)"
+  if grep -q '^export CLAUDEOP_API_KEY=' "$rc" 2>/dev/null; then
+    # Replace the existing line; keep a backup (made above).
+    python3 - "$rc" "$apikey" <<'PYEOF'
+import sys
+rc_path, key = sys.argv[1], sys.argv[2]
+with open(rc_path) as f:
+    lines = f.readlines()
+with open(rc_path, "w") as f:
+    for ln in lines:
+        f.write("export CLAUDEOP_API_KEY='%s'\n" % key.replace("'", "'\\''") if ln.startswith("export CLAUDEOP_API_KEY=") else ln)
+PYEOF
+  else
+    printf "export CLAUDEOP_API_KEY='%s'\n" "${apikey//\'/\'\\\'\'}" >> "$rc"
+  fi
+  export CLAUDEOP_API_KEY="$apikey"
+  echo "login.sh: saved CLAUDEOP_API_KEY to $rc (backup made) and this shell; verify with: claudeop --models"
+  echo "login.sh: WARNING — the key is stored in plaintext; do not share it or commit it."
+  exit 0
 fi
 
 if [ -z "$EXE" ]; then

@@ -469,7 +469,7 @@ install.ps1: done (wrappers + CLIProxyAPI).
      auto-picks a free callback port and restarts the proxy for you):
        & "$HOME\.claudex\login.ps1" codex          # GPT route (claudex)
        & "$HOME\.claudex\login.ps1" antigravity    # Gemini route (claudemini)
-       # OpenCode Go key  ->  `$env:CLAUDEOP_API_KEY = '...'   (claudeop)
+       & "$HOME\.claudex\login.ps1" opencode       # OpenCode Go key (claudeop, saved to User env)
        # VLLM server      ->  start it, set `$env:CLAUDEN_BASE_URL  (clauden)
   3. Restart the proxy so it picks up the new credentials:
 $restartLine
@@ -484,7 +484,7 @@ install.ps1: done.
      auto-picks a free callback port and restarts the proxy for you):
        & "$HOME\.claudex\login.ps1" codex          # GPT route (claudex)
        & "$HOME\.claudex\login.ps1" antigravity    # Gemini route (claudemini)
-       # OpenCode Go key  ->  $env:CLAUDEOP_API_KEY = '...'   (claudeop)
+       & "$HOME\.claudex\login.ps1" opencode       # OpenCode Go key (claudeop, saved to User env)
        # VLLM server      ->  start it, set $env:CLAUDEN_BASE_URL  (clauden)
      then restart the proxy so it picks up the credentials.
   3. Verify:  claudex --models;  claudemini --models;  claudeop --models;  clauden --models
