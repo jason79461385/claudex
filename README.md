@@ -756,13 +756,35 @@ done
 所以 proxy 對它完全透明。
 
 **前提：雙方都要 Claude Code 2.1.228 以上。** 收訊靠 unix socket
-（`/tmp/cc-socks/<pid>.sock`），實測 2.1.226 以下的 session 不會建立它，只能發不能收。
+（`/tmp/cc-socks/<pid>.sock`；Windows 則為 Named Pipe `\\.\pipe\LOCAL\cc-msg-*`），實測 2.1.226 以下的 session 不會建立它，只能發不能收。
 
-用法 —— 開兩個終端機，各自取名：
+**Windows / 未登入官方帳號注意事項（強制開啟通訊通道）**：
+在 Windows 環境或未登入官方帳號（使用本地 Proxy / 第三方模型）時，Claude Code 內部的跨 Session 通訊開關預設可能關閉，導致收訊端不會建立監聽管道（`~/.claude/sessions/<pid>.json` 缺少 `messagingSocketPath`，發送時會出現 `No agent named ... is reachable` 錯誤）。
 
+可透過官方底層預留的環境變數強制開啟：
+
+- **Windows（PowerShell 永久生效，建議）**：
+  ```powershell
+  [System.Environment]::SetEnvironmentVariable("CLAUDE_CODE_HARBOR_KITE", "1", "User")
+  ```
+  *(設定後重開終端機生效；亦可選用 `CLAUDE_CODE_HARBOR_KITE_PACING_OFF=1` 解除 session 之間的訊息冷卻限制)*
+- **Linux / macOS（或當前視窗臨時設定）**：
+  ```bash
+  export CLAUDE_CODE_HARBOR_KITE=1
+  ```
+
+用法 —— 開兩個終端機，各自取名（或在 session 內用 `/rename <名稱>`）：
+
+**macOS / Linux**：
 ```bash
 CLAUDE_CODE_SESSION_NAME=main   claude     # 指揮方
 CLAUDE_CODE_SESSION_NAME=worker claudex    # 工作方
+```
+
+**Windows (PowerShell)**：
+```powershell
+$env:CLAUDE_CODE_SESSION_NAME = "main"; claude      # 指揮方
+$env:CLAUDE_CODE_SESSION_NAME = "worker"; claudex   # 工作方
 ```
 
 然後在 `main` 那邊用自然語言下指令（不是打工具名稱）：
