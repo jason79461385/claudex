@@ -5,6 +5,10 @@ config.yaml
 *auth*.json
 codex-*.json
 
+# Installer-managed runtime (never commit the binary or local proxy state).
+bin/
+proxy/
+
 # Python bridge bytecode
 __pycache__/
 *.pyc

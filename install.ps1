@@ -251,6 +251,30 @@ function Enable-ProxyAutostart {
   return $true
 }
 
+function Add-BinToUserPath {
+  # Adds $Dir\bin to the User PATH once (no admin needed); also updates this session.
+  param([string]$BinDir)
+  try {
+    $cur = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $parts = @()
+    if (-not [string]::IsNullOrEmpty($cur)) { $parts = $cur -split ';' }
+    $found = $false
+    foreach ($p in $parts) {
+      if ($p.TrimEnd('\', '/').Equals($BinDir.TrimEnd('\', '/'), [System.StringComparison]::OrdinalIgnoreCase)) { $found = $true; break }
+    }
+    if (-not $found) {
+      $new = if ([string]::IsNullOrEmpty($cur)) { $BinDir } else { $cur.TrimEnd(';') + ';' + $BinDir }
+      [Environment]::SetEnvironmentVariable('Path', $new, 'User')
+      Write-Host "install.ps1: added $BinDir to User PATH"
+    } else {
+      Write-Host 'install.ps1: bin dir already on User PATH'
+    }
+    if (($env:Path -split ';') -notcontains $BinDir) { $env:Path = $env:Path.TrimEnd(';') + ';' + $BinDir }
+  } catch {
+    Write-Warning "install.ps1: could not update User PATH ($($_.Exception.Message)); use the full path: & `"$BinDir\cli-proxy-api.exe`""
+  }
+}
+
 function Setup-Proxy {
   Write-Host 'install.ps1: setting up CLIProxyAPI (binary + localhost-only config + autostart) ...'
   if (Test-ProxyAlive) {
@@ -261,6 +285,7 @@ function Setup-Proxy {
   $binDir = Join-Path $Dir 'bin'
   $exe = Install-ProxyBinary -BinDir $binDir
   if (-not $exe) { return }
+  Add-BinToUserPath -BinDir $binDir
   $conf = Join-Path $Dir 'proxy\config.yaml'
   if (-not (Ensure-ProxyConfig -Path $conf)) { return }
   if (-not (Enable-ProxyAutostart -Exe $exe -Config $conf)) { return }
