@@ -142,6 +142,19 @@ cliproxyapi -antigravity-login
 
 也可以在 CLIProxyAPI 設定檔放入 `gemini-api-key`，不用 OAuth。兩條路線可以同時設定；之後由 `claudex` 或 `claudemini` 選擇要走哪一條。
 
+> **Windows 建議用登入小幫手**（repo 根目錄的 `login.ps1`；macOS/Linux 用 `login.sh`）：
+> 它會先測試預設 callback port 能不能綁（Antigravity 的 `51121` 常落在 Windows 保留區段而失敗），
+> 不能綁就自動換一個可用 port 再登入，登完自動重啟背景 proxy：
+>
+> ```powershell
+> & $HOME\.claudex\login.ps1 codex          # GPT 路線
+> & $HOME\.claudex\login.ps1 antigravity    # Gemini 路線
+> & $HOME\.claudex\login.ps1 codex-device   # 無瀏覽器時用 device flow，不需要 callback port
+> ```
+>
+> macOS/Linux：`~/.claudex/login.sh antigravity`。手動登入時記得加 `-config` 指到正確設定檔，
+> 以及登入後重啟服務（見下方）。
+
 OpenCode Go 不經過 CLIProxyAPI，直接到 [OpenCode auth](https://opencode.ai/auth) 登入並建立 API key。需要依 OpenCode 當前要求完成帳務設定；這把 key 只放在 shell 的 `CLAUDEOP_API_KEY`，不要寫進 repo。
 
 憑證會存到 `~/.cli-proxy-api/`。OpenCode key 不會存到這裡；兩種憑證都不要分享、不要進版控。
@@ -682,6 +695,12 @@ OAuth 憑證過期或沒載入。重跑對應的登入指令（GPT 用 `cliproxy
 
 **`claudemini: the proxy serves no Gemini model.`**
 Proxy 本身有回應，但 `/v1/models` 沒有符合 `CLAUDEMINI_INCLUDE` 的 id。先跑 `claudemini --models-all` 看實際 id；若還沒登入，執行 `cliproxyapi -antigravity-login` 後重啟服務。
+
+**登入時 `failed to start callback server: listen tcp :51121: bind: ... forbidden`**
+Windows 把 `51121`（Antigravity 預設 callback port）劃進保留區段（Hyper-V/WSL 留的，可用
+`netsh interface ipv4 show excludedportrange` 確認）。不要硬改系統保留區，用登入小幫手自動換 port：
+`& $HOME\.claudex\login.ps1 antigravity`（macOS/Linux 用 `~/.claudex/login.sh antigravity`）；
+手動則加 `-oauth-callback-port <可用port>`（Codex 預設是 `1455`，`codex-device-login` 不需要 callback port）。
 
 **Gemini route 回 400，錯誤提到 `query.where` / `prefixItems`**
 這是目前 Gemini function-calling validator 不接受 Artifact 工具 schema。保留預設的 `CLAUDEMINI_DISALLOW=Artifact`；只有確認 route 已支援該 schema 後才設成空字串。

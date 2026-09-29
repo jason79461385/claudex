@@ -465,9 +465,10 @@ try {
 install.ps1: done (wrappers + CLIProxyAPI).
   Next steps:
   1. Restart PowerShell (or dot-source your `$PROFILE)
-  2. Log in once per route you use (OAuth opens a browser):
-       $loginBin -codex-login          # GPT route (claudex)
-       $loginBin -antigravity-login    # Gemini route (claudemini)
+  2. Log in once per route you use (OAuth opens a browser; the helper
+     auto-picks a free callback port and restarts the proxy for you):
+       & "$HOME\.claudex\login.ps1" codex          # GPT route (claudex)
+       & "$HOME\.claudex\login.ps1" antigravity    # Gemini route (claudemini)
        # OpenCode Go key  ->  `$env:CLAUDEOP_API_KEY = '...'   (claudeop)
        # VLLM server      ->  start it, set `$env:CLAUDEN_BASE_URL  (clauden)
   3. Restart the proxy so it picks up the new credentials:
@@ -479,9 +480,10 @@ $restartLine
 install.ps1: done.
   Next steps:
   1. Restart PowerShell (or dot-source your $PROFILE)
-  2. Log in to whatever your routes need (each needed once):
-       cliproxyapi -codex-login          # GPT route (claudex)
-       cliproxyapi -antigravity-login    # Gemini route (claudemini)
+  2. Log in to whatever your routes need (each needed once; the helper
+     auto-picks a free callback port and restarts the proxy for you):
+       & "$HOME\.claudex\login.ps1" codex          # GPT route (claudex)
+       & "$HOME\.claudex\login.ps1" antigravity    # Gemini route (claudemini)
        # OpenCode Go key  ->  $env:CLAUDEOP_API_KEY = '...'   (claudeop)
        # VLLM server      ->  start it, set $env:CLAUDEN_BASE_URL  (clauden)
      then restart the proxy so it picks up the credentials.

@@ -575,9 +575,10 @@ if [ -n "$WITH_PROXY" ] && [ -n "$PROXY_OK" ]; then
 install.sh: done (wrappers + CLIProxyAPI).
   Next steps:
   1. Restart your shell (or run: source ${RC})
-  2. Log in once per route you use (OAuth opens a browser):
-       ${login_bin} -codex-login          # GPT route (claudex)
-       ${login_bin} -antigravity-login    # Gemini route (claudemini)
+  2. Log in once per route you use (OAuth opens a browser; login.sh
+     auto-picks a free callback port and restarts the proxy for you):
+       ~/.claudex/login.sh codex          # GPT route (claudex)
+       ~/.claudex/login.sh antigravity    # Gemini route (claudemini)
        # OpenCode Go key  ->  export CLAUDEOP_API_KEY=...   (claudeop)
        # VLLM server      ->  vllm serve ...                (clauden)
   3. Restart the proxy so it picks up the new credentials:
@@ -589,9 +590,10 @@ else
 install.sh: done.
   Next steps:
   1. Restart your shell (or run: source ${RC})
-  2. Log in to whatever your routes need (each needed once):
-       cliproxyapi -codex-login          # GPT route (claudex)
-       cliproxyapi -antigravity-login    # Gemini route (claudemini)
+  2. Log in to whatever your routes need (each needed once; login.sh
+     auto-picks a free callback port and restarts the proxy for you):
+       ~/.claudex/login.sh codex          # GPT route (claudex)
+       ~/.claudex/login.sh antigravity    # Gemini route (claudemini)
        # OpenCode Go key  ->  export CLAUDEOP_API_KEY=...   (claudeop)
        # VLLM server      ->  vllm serve ...                (clauden)
      then restart the proxy service so it picks up the credentials.
