@@ -5,4 +5,9 @@ config.yaml
 *auth*.json
 codex-*.json
 
+# Python bridge bytecode
+__pycache__/
+*.pyc
+*.pyo
+
 .DS_Store

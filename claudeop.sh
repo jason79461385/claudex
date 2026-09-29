@@ -10,7 +10,9 @@
 # Environment knobs (all optional except CLAUDEOP_API_KEY):
 #   CLAUDEOP_BASE_URL        API address (default https://opencode.ai/zen/go/v1)
 #   CLAUDEOP_API_KEY         OpenCode Go API key
-#   CLAUDEOP_MODEL           primary model (default deepseek-v4-pro)
+#   CLAUDEOP_MODEL           pin the primary model; empty means newest catalogue entry
+#   CLAUDEOP_FALLBACK_MODEL  used when the catalogue cannot be fetched
+#   CLAUDEOP_EXCLUDE         regex of model ids to ignore during auto-selection
 #   CLAUDEOP_SUBAGENT_MODEL  model for spawned agents (default: same as primary)
 #   CLAUDEOP_MAX_CONTEXT_TOKENS known context window; unset preserves Claude Code's default
 #   CLAUDEOP_TOOL_SEARCH     true|false (default false; enable only if route forwards tool_reference)
@@ -21,7 +23,9 @@
 
 : "${CLAUDEOP_BASE_URL:=https://opencode.ai/zen/go/v1}"
 : "${CLAUDEOP_API_KEY:=}"
-: "${CLAUDEOP_MODEL:=deepseek-v4-pro}"
+: "${CLAUDEOP_MODEL:=}"
+: "${CLAUDEOP_FALLBACK_MODEL:=deepseek-v4-pro}"
+: "${CLAUDEOP_EXCLUDE:=image|audio|tts|whisper|transcribe|embed|embedding|moderation|realtime|review|search}"
 : "${CLAUDEOP_SUBAGENT_MODEL:=}"
 : "${CLAUDEOP_MAX_CONTEXT_TOKENS:=${CLAUDE_CODE_MAX_CONTEXT_TOKENS:-}}"
 : "${CLAUDEOP_TOOL_SEARCH:=false}"
@@ -52,9 +56,9 @@ __claudeop_anthropic_base_url() {
   esac
 }
 
-# Output is "<id>\t<direct|chat>". The Go catalogue contains multiple
-# protocols; the bridge currently supports the Chat Completions route for
-# non-Claude models, which covers DeepSeek V4.
+# Output is "<id>\t<date>\t<direct|chat>\t<ok|skip>", newest first.
+# The Go catalogue contains multiple protocols; the bridge currently supports
+# the Chat Completions route for non-Claude models, which covers DeepSeek V4.
 __claudeop_models() {
   __claudeop_require_key || return
   curl -sf --max-time 10 \
@@ -62,17 +66,67 @@ __claudeop_models() {
        -H "User-Agent: claudeop/1.0" \
        -H "x-opencode-session: claudeop-model-list" \
        "${CLAUDEOP_BASE_URL}/models" 2>/dev/null |
-  python3 -c '
-import json, sys
+  CLAUDEOP_EXCLUDE="$CLAUDEOP_EXCLUDE" python3 -c '
+import datetime
+import json
+import os
+import re
+import sys
+
 try:
     rows = json.load(sys.stdin).get("data", [])
 except Exception:
     sys.exit(1)
+
+exclude = os.environ.get("CLAUDEOP_EXCLUDE", "").strip()
+skip = re.compile(exclude, re.I) if exclude else None
+rows = [row for row in rows if row.get("id")]
+
+
+def created_value(row):
+    value = row.get("created") or 0
+    try:
+        stamp = int(value)
+    except (TypeError, ValueError):
+        stamp = 0
+    # Be tolerant of millisecond timestamps from OpenAI-compatible catalogues.
+    return stamp // 1000 if stamp > 10_000_000_000 else stamp
+
+
+def version(model):
+    match = re.search(r"(?<!\d)(\d+)(?:[.-](\d+))?", model)
+    return (int(match.group(1)), int(match.group(2) or 0)) if match else (-1, -1)
+
+
+rows.sort(key=lambda row: (
+    -created_value(row),
+    -version(row["id"])[0],
+    -version(row["id"])[1],
+    row["id"],
+))
 for row in rows:
-    model = row.get("id")
-    if model:
-        print(model + "\t" + ("direct" if model.startswith("claude-") else "chat"))
+    model = row["id"]
+    created = created_value(row)
+    if created:
+        try:
+            day = datetime.datetime.fromtimestamp(
+                created, datetime.timezone.utc
+            ).date().isoformat()
+        except (OverflowError, OSError, ValueError):
+            day = "(invalid date)"
+    else:
+        day = "(no date)"
+    kind = "direct" if model.startswith("claude-") else "chat"
+    status = "skip" if skip and skip.search(model) else "ok"
+    print(f"{model}\t{day}\t{kind}\t{status}")
 '
+}
+
+# The model that would be used right now: newest usable catalogue entry.
+__claudeop_pick() {
+  local id
+  id=$(__claudeop_models | awk -F'\t' '$4=="ok"{print $1; exit}')
+  printf '%s\n' "${id:-$CLAUDEOP_FALLBACK_MODEL}"
 }
 
 __claudeop_start_bridge() {
@@ -133,35 +187,45 @@ __claudeop_stop_bridge() {
 }
 
 claudeop() {
-  local model="" list a prev="" id kind sub bridge="" frontend_model rewrite_prev
+  local model="" list a prev="" id day kind model_status showall="" sub bridge="" frontend_model rewrite_prev
   local -a child_args
 
   case "$1" in
-    --models|--list-models|--models-all)
-      __claudeop_require_key || return
-      list=$(__claudeop_models)
-      if [ -z "$list" ]; then
-        echo "claudeop: cannot reach OpenCode Go or the API key was rejected" >&2
-        echo "         check CLAUDEOP_BASE_URL, CLAUDEOP_API_KEY, and your network connection" >&2
-        return 1
-      fi
-      model="${CLAUDEOP_MODEL:-deepseek-v4-pro}"
-      printf '%s\n' "$list" | while IFS="$(printf '\t')" read -r id kind; do
-        if [ "$kind" = "direct" ]; then
-          if [ "$id" = "$model" ]; then
-            printf '  %-28s <- claudeop uses this (Anthropic Messages)\n' "$id"
-          else
-            printf '  %-28s (Anthropic Messages)\n' "$id"
-          fi
-        elif [ "$id" = "$model" ]; then
-          printf '  %-28s <- claudeop uses this (local Chat Completions bridge)\n' "$id"
-        else
-          printf '  %-28s (local Chat Completions bridge; DeepSeek V4 route)\n' "$id"
-        fi
-      done
-      return 0
-      ;;
+    --models|--list-models) ;;
+    --models-all) showall="yes" ;;
   esac
+
+  if [ -n "$showall" ] || [ "$1" = "--models" ] || [ "$1" = "--list-models" ]; then
+    __claudeop_require_key || return
+    list=$(__claudeop_models)
+    if [ -z "$list" ]; then
+      echo "claudeop: cannot reach OpenCode Go or the API key was rejected" >&2
+      echo "         check CLAUDEOP_BASE_URL, CLAUDEOP_API_KEY, and your network connection" >&2
+      return 1
+    fi
+    model="${CLAUDEOP_MODEL:-$(printf '%s\n' "$list" | awk -F'\t' '$4=="ok"{print $1; exit}')}"
+    [ -n "$model" ] || model="$CLAUDEOP_FALLBACK_MODEL"
+    if ! printf '%s\n' "$list" | awk -F'\t' '$4=="ok"{found=1} END{exit !found}'; then
+      echo "claudeop: the catalogue contains no model allowed by CLAUDEOP_EXCLUDE" >&2
+      showall="yes"
+    fi
+    printf '%s\n' "$list" | while IFS="$(printf '\t')" read -r id day kind model_status; do
+      if [ "$model_status" = "skip" ]; then
+        [ -n "$showall" ] && printf '  %-28s %s   (excluded by CLAUDEOP_EXCLUDE)\n' "$id" "$day"
+      elif [ "$kind" = "direct" ]; then
+        if [ "$id" = "$model" ]; then
+          printf '  %-28s %s   <- claudeop uses this (Anthropic Messages)\n' "$id" "$day"
+        else
+          printf '  %-28s %s\n' "$id" "$day"
+        fi
+      elif [ "$id" = "$model" ]; then
+        printf '  %-28s %s   <- claudeop uses this (local Chat Completions bridge)\n' "$id" "$day"
+      else
+        printf '  %-28s %s   (local Chat Completions bridge)\n' "$id" "$day"
+      fi
+    done
+    return 0
+  fi
 
   for a in "$@"; do
     case "$prev" in --model|-m) model="$a" ;; esac
@@ -172,7 +236,7 @@ claudeop() {
   __claudeop_require_key || return
 
   if [ -z "$model" ]; then
-    model="${CLAUDEOP_MODEL:-deepseek-v4-pro}"
+    model="${CLAUDEOP_MODEL:-$(__claudeop_pick)}"
     set -- --model "$model" "$@"
   fi
 

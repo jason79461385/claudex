@@ -1,10 +1,7 @@
 # claudex.ps1 - run Claude Code against a GPT model served by a local CLIProxyAPI.
 #
-# Install:  add  . C:\path\to\claudex.ps1   to your $PROFILE
-#
-# NOTE: this PowerShell port has NOT been executed end-to-end by its author
-#       (no PowerShell host was available). The zsh/bash version in claudex.sh
-#       is the tested one. Please report anything that breaks here.
+# Install:  add  . $HOME\.claudex\claudex.ps1   to your $PROFILE
+# Works in Windows PowerShell 5.1 and PowerShell 7+.
 #
 # Environment knobs (all optional):
 #   CLAUDEX_BASE_URL        proxy address           (default http://127.0.0.1:8317)
@@ -17,9 +14,9 @@
 #   CLAUDEX_TOOL_SEARCH     true|false              (default true)
 
 function Get-ClaudexModels {
-    <#  Chat-capable models the proxy currently serves, newest first.
-        Models released the same day sort alphabetically, so the choice stays
-        deterministic instead of depending on API ordering. #>
+    <#  Every model the proxy serves, newest first.
+        Output objects: Id, Released (YYYY-MM-DD), Usable ($true/$false).
+        Same-day releases sort alphabetically so the pick is deterministic. #>
     $base = if ($env:CLAUDEX_BASE_URL) { $env:CLAUDEX_BASE_URL } else { 'http://127.0.0.1:8317' }
     $key  = if ($env:CLAUDEX_API_KEY)  { $env:CLAUDEX_API_KEY }  else { 'sk-dummy' }
     $skip = if ($env:CLAUDEX_EXCLUDE)  { $env:CLAUDEX_EXCLUDE }  else {
@@ -33,14 +30,21 @@ function Get-ClaudexModels {
         return @()
     }
 
+    if (-not $resp.data) { return @() }
+
     $resp.data |
-        Where-Object { $_.id -and $_.id -notmatch $skip } |
+        Where-Object { $_.id } |
         Sort-Object @{ Expression = { [int64]$_.created }; Descending = $true },
                     @{ Expression = { $_.id };             Descending = $false } |
         ForEach-Object {
+            $created = [int64]$_.created
+            $day = if ($created) {
+                ([DateTimeOffset]::FromUnixTimeSeconds($created)).ToString('yyyy-MM-dd')
+            } else { '(no date)' }
             [pscustomobject]@{
                 Id       = $_.id
-                Released = ([DateTimeOffset]::FromUnixTimeSeconds([int64]$_.created)).ToString('yyyy-MM-dd')
+                Released = $day
+                Usable   = [bool]($_.id -notmatch $skip)
             }
         }
 }
@@ -51,17 +55,28 @@ function claudex {
 
     if ($null -eq $Rest) { $Rest = @() }
 
-    if ($Rest.Count -ge 1 -and ($Rest[0] -eq '--models' -or $Rest[0] -eq '--list-models')) {
+    $showAll = $false
+    if ($Rest.Count -ge 1 -and ($Rest[0] -eq '--models' -or $Rest[0] -eq '--list-models')) { $showAll = $false }
+    elseif ($Rest.Count -ge 1 -and $Rest[0] -eq '--models-all') { $showAll = $true }
+
+    if ($showAll -or ($Rest.Count -ge 1 -and ($Rest[0] -eq '--models' -or $Rest[0] -eq '--list-models'))) {
         $models = @(Get-ClaudexModels)
         if ($models.Count -eq 0) {
             $base = if ($env:CLAUDEX_BASE_URL) { $env:CLAUDEX_BASE_URL } else { 'http://127.0.0.1:8317' }
             Write-Error "claudex: cannot reach CLIProxyAPI at $base"
             return
         }
-        $chosen = if ($env:CLAUDEX_MODEL) { $env:CLAUDEX_MODEL } else { $models[0].Id }
+        $usable = @($models | Where-Object { $_.Usable })
+        $chosen = if ($env:CLAUDEX_MODEL) { $env:CLAUDEX_MODEL }
+                  elseif ($usable.Count -gt 0) { $usable[0].Id }
+                  elseif ($env:CLAUDEX_FALLBACK_MODEL) { $env:CLAUDEX_FALLBACK_MODEL }
+                  else { 'gpt-5.6-sol' }
         foreach ($m in $models) {
-            if ($m.Id -eq $chosen) { '  {0,-24} {1}   <- claudex uses this' -f $m.Id, $m.Released }
-            else                   { '  {0,-24} {1}'                        -f $m.Id, $m.Released }
+            if (-not $m.Usable) {
+                if ($showAll) { '  {0,-24} {1}   (not a chat model, skipped)' -f $m.Id, $m.Released }
+            }
+            elseif ($m.Id -eq $chosen) { '  {0,-24} {1}   <- claudex uses this' -f $m.Id, $m.Released }
+            else                        { '  {0,-24} {1}'                        -f $m.Id, $m.Released }
         }
         return
     }
@@ -81,7 +96,7 @@ function claudex {
         if ($env:CLAUDEX_MODEL) {
             $model = $env:CLAUDEX_MODEL
         } else {
-            $first = @(Get-ClaudexModels) | Select-Object -First 1
+            $first = @(Get-ClaudexModels) | Where-Object { $_.Usable } | Select-Object -First 1
             if ($first) { $model = $first.Id }
             elseif ($env:CLAUDEX_FALLBACK_MODEL) { $model = $env:CLAUDEX_FALLBACK_MODEL }
             else { $model = 'gpt-5.6-sol' }

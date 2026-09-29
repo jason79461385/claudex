@@ -9,25 +9,27 @@
 
 ## 這是什麼
 
-裝完之後你會有四個指令：
+裝完之後你會有五個指令：
 
 | 指令 | 走哪裡 | 用什麼模型 |
 |---|---|---|
 | `claude` | Anthropic 官方，**完全不變** | 你原本的 Claude 模型 |
 | `claudex` | 本機 CLIProxyAPI (`127.0.0.1:8317`) | 目前最新的 GPT 模型，**自動偵測** |
 | `claudemini` | 同一個 CLIProxyAPI | 目前最新的 Gemini 模型，**自動偵測** |
-| `claudeop` | OpenCode Go (`opencode.ai/zen/go/v1`) | Claude 直連；DeepSeek V4 等模型經 localhost bridge |
+| `claudeop` | OpenCode Go (`opencode.ai/zen/go/v1`) | 自動採用最新可用模型；Claude 直連，其他模型經 localhost bridge |
+| `clauden` | 自架 VLLM (`127.0.0.1:8000`) | 自動採用 VLLM 目錄最新可用模型；一律經 localhost bridge |
 
-`claudex`、`claudemini` 和 `claudeop` 都是 shell function。它們只在執行該次指令時注入 proxy 環境變數，不會外洩到你的 shell，也不會讓 `claude` 被永久導向 proxy。
+`claudex`、`claudemini`、`claudeop` 和 `clauden` 都是 shell function。它們只在執行該次指令時注入 proxy 環境變數，不會外洩到你的 shell，也不會讓 `claude` 被永久導向 proxy。
 
 ## 需求
 
 - **Claude Code** 已安裝（跨 session 溝通功能需要 2.1.228 以上，見〈跨 session 溝通〉）
-- **Python 3**（三個 wrapper 都用它解析模型清單；macOS/Linux 通常內建）
+- **Python 3**（`--models` 清單解析，以及 `claudeop` / `clauden` 的 localhost bridge 都需要；macOS/Linux 通常內建，Windows 需另外安裝並確認 `python` 在 PATH）
 - 使用 `claudex`：一個可用的 ChatGPT / Codex 憑證（OAuth 登入用）
 - 使用 `claudemini`：CLIProxyAPI 支援的 Gemini 憑證（Antigravity OAuth 或 API key）
 - 使用 `claudeop`：OpenCode Go API key（從 [OpenCode auth](https://opencode.ai/auth) 建立）
-- macOS 需要 Homebrew；Linux 用官方安裝腳本；Windows 用 release 執行檔（Windows 目前只提供 `claudex.ps1`）
+- 使用 `clauden`：一台已在跑的 VLLM server（預設 `http://127.0.0.1:8000`，模型需支援 tool-calling）
+- macOS 需要 Homebrew；Linux 用官方安裝腳本；Windows 用 release 執行檔＋桌面 GUI（見步驟 1），wrapper 使用 `*.ps1`
 
 ---
 
@@ -54,8 +56,10 @@ Arch 系可改用 AUR：`yay -S cli-proxy-api-bin`
 
 **Windows**
 
-到 [CLIProxyAPI releases](https://github.com/router-for-me/CLIProxyAPI/releases) 下載對應的執行檔，
-或使用桌面 GUI [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI)。
+1. 到 [CLIProxyAPI releases](https://github.com/router-for-me/CLIProxyAPI/releases) 下載 `CLIProxyAPI-windows-amd64.exe`（檔名依版本略有不同），放到固定目錄，例如 `C:\Tools\CLIProxyAPI\`。
+2. 或使用桌面 GUI [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI)，登入與改設定都在視窗裡完成。
+3. 另外安裝 [Python 3](https://www.python.org/downloads/windows/)（安裝時勾選 **Add python.exe to PATH**，`claudeop` / `clauden` 的 bridge 需要它），以及 [Claude Code for Windows](https://code.claude.com/docs/en/windows-setup)（原生安裝或 WSL 二選一；本 repo 的 `*.ps1` 是給**原生 PowerShell** 用的）。
+4. CLIProxyAPI 的設定檔與 `~/.cli-proxy-api/` 憑證目錄位置和 Linux 相同（`%USERPROFILE%\.cli-proxy-api`）；`host` 同樣要設成 `127.0.0.1`（見步驟 2）。
 
 **Docker**（任何平台）
 
@@ -145,9 +149,9 @@ curl -s -H "Authorization: Bearer sk-dummy" http://127.0.0.1:8317/v1/models
 
 清單如果是**空的**，代表 OAuth 憑證沒載入 —— 回到步驟 4 重登再重啟。
 
-### 步驟 6：手動放置 wrapper
+### 步驟 6：放置 wrapper（macOS / Linux）
 
-這個 repo 不需要 `npm install`、編譯或安裝 daemon；三個 `.sh` 檔是 wrapper，`claudeop_bridge.py` 會在選用 DeepSeek 等非 Claude 模型時暫時啟動在 localhost。你可以選一種方式取得檔案：
+這個 repo 不需要 `npm install`、編譯或安裝 daemon；四個 `.sh` 檔是 wrapper，`claudeop_bridge.py` / `clauden_bridge.py` 會在需要時暫時啟動在 localhost。你可以選一種方式取得檔案：
 
 **方式 A：clone repo（推薦）**
 
@@ -163,6 +167,8 @@ cp /path/to/claudex/claudex.sh ~/.claudex/
 cp /path/to/claudex/claudemini.sh ~/.claudex/
 cp /path/to/claudex/claudeop.sh ~/.claudex/
 cp /path/to/claudex/claudeop_bridge.py ~/.claudex/
+cp /path/to/claudex/clauden.sh ~/.claudex/
+cp /path/to/claudex/clauden_bridge.py ~/.claudex/
 ```
 
 **zsh**（macOS 預設）— 加到 `~/.zshrc`：
@@ -171,17 +177,36 @@ cp /path/to/claudex/claudeop_bridge.py ~/.claudex/
 source ~/.claudex/claudex.sh
 source ~/.claudex/claudemini.sh
 source ~/.claudex/claudeop.sh
+source ~/.claudex/clauden.sh
 ```
 
 只需要某一條路線時，可以只 source 對應檔案。**bash** — 將相同內容加到 `~/.bashrc`。
 
-**PowerShell** — 目前提供已移植的 `claudex.ps1`，加到 `$PROFILE`：
+然後 `source ~/.zshrc` / `source ~/.bashrc`。wrapper 不需要 `chmod +x`，因為它是用 `source` 載入的。
+
+### 步驟 6（Windows）：放置 wrapper（PowerShell）
+
+Windows 用的是 `*.ps1`（共四個），bridge 照樣是同一個 `*.py`（需 Python 3）：
 
 ```powershell
+# 1. 取得檔案（選一種）
+git clone https://github.com/jason79461385/claudex.git $HOME\.claudex
+#  或手動複製 claudex.ps1 / claudemini.ps1 / claudeop.ps1 / clauden.ps1
+#  以及 claudeop_bridge.py / clauden_bridge.py 到 $HOME\.claudex\
+
+# 2. 允許執行本機腳本（只需做一次，以管理員身分跑）：
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# 3. 把下面四行加到 $PROFILE（先跑 notepad $PROFILE，不存在會自動建立）：
 . $HOME\.claudex\claudex.ps1
+. $HOME\.claudex\claudemini.ps1
+. $HOME\.claudex\claudeop.ps1
+. $HOME\.claudex\clauden.ps1
 ```
 
-然後 `source ~/.zshrc` / `source ~/.bashrc`，或關掉再開一個 PowerShell 視窗。wrapper 不需要 `chmod +x`，因為它是用 `source` / dot-source 載入的。
+只需要某一條路線時，可以只 dot-source 對應檔案。然後關掉重開一個 PowerShell 視窗。
+
+> `claudeop` / `clauden` 在 Windows 上一樣會自動啟動 localhost bridge（`python claudeop_bridge.py ...`），結束後自動停止；`python` 必須在 PATH 裡，否則會報 bridge 啟動失敗。
 
 ---
 
@@ -201,12 +226,16 @@ claudemini --print "hello"           # 使用 Gemini route 執行
 printf 'OpenCode Go API key: '
 read -r -s CLAUDEOP_API_KEY
 printf '\n'
-claudeop                             # 預設使用 deepseek-v4-pro
-claudeop --models                    # 列出 OpenCode Go 全部模型與 route
-claudeop --models-all                # 同上，保留相容的別名
+claudeop                             # 自動使用 catalogue 中最新的可用模型
+claudeop --models                    # 列出可自動選用的模型（依新到舊）
+claudeop --models-all                # 連同 CLAUDEOP_EXCLUDE 排除的模型
 claudeop --print "hello"             # 使用 OpenCode Go 執行
-claudeop --model deepseek-v4-pro --print "hello"  # 經 localhost bridge 使用 DeepSeek V4
+claudeop --model deepseek-v4-pro --print "hello"  # 指定模型，經 localhost bridge 執行
 unset CLAUDEOP_API_KEY               # 不留在目前 shell
+
+clauden                              # 自動使用 VLLM 目錄中最新的可用模型
+clauden --models                     # 列出 VLLM 服務的模型
+clauden --model my-qwen3 --print "hello"  # 指定 VLLM 模型，經 localhost bridge 執行
 
 claude                               # 原本的 Claude Code，完全不受影響
 ```
@@ -249,16 +278,37 @@ export CLAUDEMINI_DISALLOW=""
 `claudeop` 會依模型選擇 route：
 
 - `claude-*`：直接使用 OpenCode Go 的 Anthropic Messages endpoint。
-- `deepseek-*`（包含 DeepSeek V4）：自動啟動 `claudeop_bridge.py`，在 `127.0.0.1` 把 Claude Code 的 Messages request 轉成 OpenCode 的 Chat Completions request。
-- `claudeop --models`：列出 OpenCode Go 回傳的**全部模型**，並標示 direct 或 local bridge。
+- 非 `claude-*` 模型（包含 DeepSeek V4）：自動啟動 `claudeop_bridge.py`，在 `127.0.0.1` 把 Claude Code 的 Messages request 轉成 OpenCode 的 Chat Completions request。
+- `claudeop --models`：列出 OpenCode Go 回傳、可自動選用的模型，依 `created` 由新到舊排序，並標示 direct 或 local bridge；`--models-all` 會把 `CLAUDEOP_EXCLUDE` 排除的模型也列出。
+- 沒有指定模型時，每次啟動都重新抓 `/models`，選最新可用模型；若 catalogue 抓不到，改用 `CLAUDEOP_FALLBACK_MODEL`。
+- `CLAUDEOP_MODEL` 或顯式 `--model` 可固定／覆寫自動選擇；`CLAUDEOP_SUBAGENT_MODEL` 留空時跟隨實際選中的主模型。
 - bridge 只在該次 `claudeop` 執行期間存在，結束後自動停止；API key 由 bridge 直接轉送給 OpenCode，不寫入 command line。
-- 預設模型是 `deepseek-v4-pro`；可用 `CLAUDEOP_MODEL` 或 `--model` 改變。
 - `CLAUDEOP_TOOL_SEARCH` 預設是 `false`。確認 route 會轉送 `tool_reference` 後，才改成 `true`。
 - 非 Claude 模型會以已知的 Claude Code model label 啟動，bridge 再把 upstream model 固定回你選的 OpenCode model；因此不會在本地 model catalog 階段因 `deepseek-*` 而拒絕。
 - bridge 也提供 localhost 的 `GET /v1/models` 與 `GET /v1/models/<id>` probe，避免 Claude Code 在送出 Messages 前把相容 model 誤判成不可用。
 - `CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT=1` 仍會啟用，避免 Claude Code 對這個相容 label 錯誤套用 context window 限制；實際 context 上限仍由 OpenCode 模型決定。
 
 這條路線不經過本機 CLIProxyAPI，也不會使用 Codex 或 Gemini OAuth。非 Claude 模型的工具呼叫、串流和文字回覆由 bridge 轉換；圖片、文件與 OpenCode 尚未支援的特殊工具仍可能不相容。
+
+### `clauden` 的特別行為（自架 VLLM）
+
+`clauden` 讓 Claude Code 跑在你自己的 VLLM server 上。VLLM 只懂 OpenAI Chat Completions，所以**每個 session 都經過** `clauden_bridge.py`（localhost，結束後自動停止）：
+
+- `clauden --models`：列出 VLLM `/v1/models` 回傳的模型，依 `created` 由新到舊排序；`--models-all` 會把 `CLAUDEN_EXCLUDE` 排除的模型也列出。
+- 沒有指定模型時，每次啟動都重新抓 `/v1/models`，選最新可用模型；抓不到時改用 `CLAUDEN_MODEL` / `CLAUDEN_FALLBACK_MODEL`。
+- subagent 共用同一個 session bridge，所以永遠跟主模型用同一個 VLLM 模型。
+- 被 serve 的模型需要 tool-calling 支援（例如 `vllm serve ... --enable-auto-tool-choice --tool-call-parser <parser>`），否則 Claude Code 的工具（Read/Edit/Bash…）無法運作。
+- reasoning 模型的 `reasoning_content` 會被丟掉，只保留最終答案文字。
+- VLLM server 本身不由這個 repo 啟動；先確認 `curl http://127.0.0.1:8000/v1/models` 有回應再跑 `clauden`。
+
+```bash
+# 啟動 VLLM（範例，模型與參數依你的 GPU 調整）
+vllm serve Qwen/Qwen3-8B --enable-auto-tool-choice --tool-call-parser hermes
+
+# 之後在另一個終端機
+clauden --models
+clauden --print "Reply with exactly: OK"
+```
 
 ### 換模型
 
@@ -303,8 +353,22 @@ claudeop --model claude-sonnet-4-6
 export CLAUDEOP_MODEL=claude-sonnet-4-6
 claudeop
 
-# 取消固定，恢復預設 deepseek-v4-pro
+# 取消固定，恢復自動選最新可用模型
 unset CLAUDEOP_MODEL
+```
+
+`clauden` 支援同樣的三種方式（變數改成 `CLAUDEN_*`）：
+
+```bash
+# 只有這一次
+clauden --model my-qwen3
+
+# 固定目前終端機視窗
+export CLAUDEN_MODEL=my-qwen3
+clauden
+
+# 取消固定，恢復自動選最新可用模型
+unset CLAUDEN_MODEL
 ```
 
 DeepSeek V4 會自動走 bridge：
@@ -404,7 +468,9 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 |---|---|---|
 | `CLAUDEOP_BASE_URL` | `https://opencode.ai/zen/go/v1` | OpenCode Go API 位址 |
 | `CLAUDEOP_API_KEY` | *(必填)* | OpenCode Go API key |
-| `CLAUDEOP_MODEL` | `deepseek-v4-pro` | 固定主模型 |
+| `CLAUDEOP_MODEL` | *(空)* | 固定主模型；留空時每次自動選 catalogue 最新可用模型 |
+| `CLAUDEOP_FALLBACK_MODEL` | `deepseek-v4-pro` | catalogue 無法取得時的保底模型 |
+| `CLAUDEOP_EXCLUDE` | `image\|audio\|tts\|...` | 自動選模時要忽略的模型 id 正規表達式 |
 | `CLAUDEOP_SUBAGENT_MODEL` | *(空，跟隨主模型)* | subagent 模型 |
 | `CLAUDEOP_MAX_CONTEXT_TOKENS` | *(空)* | 已確認的 context / auto-compaction 門檻 |
 | `CLAUDEOP_TOOL_SEARCH` | `false` | 是否啟用延後工具搜尋；需 route 支援 `tool_reference` |
@@ -413,11 +479,25 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 | `CLAUDEOP_FRONTEND_MODEL` | `claude-sonnet-5` | Claude Code 本地相容 label；bridge 仍使用你選的 OpenCode model |
 | `CLAUDEOP_DEBUG` | *(空)* | 設為 `1` 時顯示 bridge HTTP diagnostics；不顯示 request body 或 key |
 
-模型的優先順序：`--model` > `CLAUDEX_MODEL` > 自動偵測 > `CLAUDEX_FALLBACK_MODEL`
+`clauden`（自架 VLLM）使用另一組前綴：
+
+| 變數 | 預設 | 用途 |
+|---|---|---|
+| `CLAUDEN_BASE_URL` | `http://127.0.0.1:8000` | VLLM 位址，可含或不含 `/v1` |
+| `CLAUDEN_API_KEY` | *(空)* | VLLM API key；留空代表不送 auth header |
+| `CLAUDEN_MODEL` | *(空)* | 固定主模型；留空時每次自動選目錄最新可用模型 |
+| `CLAUDEN_FALLBACK_MODEL` | *(空，跟隨 `CLAUDEN_MODEL`)* | 目錄抓不到時的保底模型 |
+| `CLAUDEN_EXCLUDE` | `image\|audio\|tts\|...` | 自動選模時要忽略的模型 id 正規表達式 |
+| `CLAUDEN_MAX_CONTEXT_TOKENS` | *(空)* | 已確認的 context / auto-compaction 門檻 |
+| `CLAUDEN_TOOL_SEARCH` | `true` | 是否啟用延後工具搜尋 |
+| `CLAUDEN_BRIDGE_SCRIPT` | `clauden_bridge.py` 同目錄 | 轉接程式路徑 |
+| `CLAUDEN_BRIDGE_PORT` | `0` | localhost bridge port；`0` 代表自動挑選 |
+| `CLAUDEN_FRONTEND_MODEL` | `claude-sonnet-5` | Claude Code 本地相容 label；bridge 仍使用你選的 VLLM model |
+| `CLAUDEN_DEBUG` | *(空)* | 設為 `1` 時顯示 bridge 錯誤（不含 request 資料） |
+
+`claudeop` 模型的優先順序：`--model` > `CLAUDEOP_MODEL` > 自動偵測 > `CLAUDEOP_FALLBACK_MODEL`
 
 `claudemini` 的優先順序：`--model` > `CLAUDEMINI_MODEL` > 自動偵測 > `CLAUDEMINI_FALLBACK_MODEL`
-
-`claudeop` 的優先順序：`--model` > `CLAUDEOP_MODEL` > `deepseek-v4-pro`
 
 若已確認目前透過 proxy 使用的模型與 route 都支援 1M context，可在 `source` 前設定：
 
@@ -475,9 +555,25 @@ claudex --print "Reply with exactly: OK"
 claudemini --print "Reply with exactly: OK"
 
 # 6. OpenCode Go（先設定 CLAUDEOP_API_KEY）
-claudeop --models                       # 應包含 deepseek-v4-pro 等模型
+claudeop --models                       # 應列出 catalogue 模型
 claudeop --print "Reply with exactly: OK"  # Claude direct route
 claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"  # bridge route
+
+# 7. 自架 VLLM（先啟動 vllm serve）
+clauden --models                        # 應列出 VLLM 服務的模型
+clauden --print "Reply with exactly: OK"
+```
+
+Windows（PowerShell）的對應檢查：
+
+```powershell
+# wrappers 存在，而且是 function
+Get-Command claudex, claudemini, claudeop, clauden
+# 環境變數沒有外洩（應無輸出）
+Get-ChildItem Env:ANTHROPIC_BASE_URL, Env:ANTHROPIC_AUTH_TOKEN -ErrorAction SilentlyContinue
+# 端到端
+claudex --print "Reply with exactly: OK"
+clauden --print "Reply with exactly: OK"
 ```
 
 ---
@@ -499,8 +595,14 @@ claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"  # bridge rout
 **仍看到 `[claude-code:unrecognized_model]` 或只有 generic model error**
 重新執行 `source ~/.claudex/claudeop.sh`。非 Claude route 會用 `CLAUDEOP_FRONTEND_MODEL`（預設 `claude-sonnet-5`）作為 Claude Code 的本地 label，再由 bridge 轉送實際 OpenCode model。若仍失敗，可用 `CLAUDEOP_DEBUG=1 claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"` 顯示不含 request body/key 的 bridge diagnostics。
 
-**`claudeop: bridge script not found`**
-把 `claudeop.sh` 和 `claudeop_bridge.py` 放在同一個目錄，或設定 `CLAUDEOP_BRIDGE_SCRIPT=/absolute/path/to/claudeop_bridge.py`。
+**`claudeop: bridge script not found` / `clauden: bridge script not found`**
+把 `claudeop.sh` 和 `claudeop_bridge.py`（或 `clauden.sh` 和 `clauden_bridge.py`）放在同一個目錄，或設定 `CLAUDEOP_BRIDGE_SCRIPT` / `CLAUDEN_BRIDGE_SCRIPT` 為絕對路徑。Windows 上還要確認 `python` 在 PATH 裡（`python --version` 有回應）。
+
+**`clauden: cannot reach VLLM` / `clauden: no model selected`**
+VLLM 沒跑或位址錯誤。先跑 `curl http://127.0.0.1:8000/v1/models` 確認；位址不同時設定 `CLAUDEN_BASE_URL`。離線固定模型時設定 `CLAUDEN_MODEL`。
+
+**`clauden` 工具呼叫沒反應**
+被 serve 的模型不支援 tool-calling。啟動 VLLM 時加上 `--enable-auto-tool-choice --tool-call-parser <parser>`（parser 依模型家族選擇，例如 hermes、llama3_json、qwen3 等）。
 
 **DeepSeek 回 400、工具呼叫失敗或輸出格式不完整**
 目前 bridge 轉換文字、圖片 URL/base64、工具宣告、tool call 和串流；Anthropic 特殊 blocks、文件、部分 server tools 仍可能不相容。先用簡單文字任務確認 route，再逐步加入工具。
@@ -621,8 +723,9 @@ rm -rf ~/.cli-proxy-api
 | macOS 26.4 / arm64 / zsh | ✅ 完整實測 |
 | bash | ✅ `claudex.sh` 全功能實測（與 zsh 行為一致） |
 | Linux | ⚠️ 安裝指令引自官方文件，未實機驗證 |
-| Windows / PowerShell | ⚠️ `claudex.ps1` **未執行過**，僅照邏輯移植 |
+| Windows / PowerShell | ⚠️ 四個 `*.ps1` 已照邏輯移植（含 bridge 啟動），**未在 Windows 實機執行過** |
 | Docker | ⚠️ 指令引自官方文件，未實機驗證 |
 | OpenCode Go / `claudeop` | ⚠️ `/v1/models` endpoint 已確認可連線；需要使用者 API key 才能做端到端驗證 |
+| 自架 VLLM / `clauden` | ⚠️ bridge 邏輯與 `claudeop` 同源；需使用者自備 VLLM server 驗證 |
 
 歡迎回報，尤其是 Linux、Windows 和 OpenCode Go 的實際結果。

@@ -1,8 +1,19 @@
 #!/usr/bin/env python3
-"""Local Anthropic-Messages to OpenAI-Chat-Completions bridge for claudeop.
+"""Local Anthropic-Messages to OpenAI-Chat-Completions bridge for clauden.
 
-The bridge is intentionally localhost-only. It forwards the OpenCode Go key
-upstream and never logs request headers or bodies.
+Claude Code speaks Anthropic Messages; VLLM serves OpenAI Chat Completions.
+The bridge translates between the two so `clauden` sessions can run against
+a self-hosted VLLM server.
+
+The bridge is intentionally localhost-only. It forwards the VLLM key upstream
+(if one is configured) and never logs request headers or bodies.
+
+VLLM notes:
+- The served model should support tool calling (e.g. served with
+  `--enable-auto-tool-choice --tool-call-parser <parser>`) for Claude Code's
+  tools (Read/Edit/Bash/...) to work.
+- Reasoning traces (`reasoning_content` from reasoning models) are dropped;
+  only the final answer text is forwarded.
 """
 
 from __future__ import annotations
@@ -51,41 +62,8 @@ def text_from_content(content: Any) -> str:
     return "".join(parts)
 
 
-def _handle_document_block(block: dict[str, Any]) -> list[dict[str, Any]]:
-    """Convert Anthropic document block to OpenAI-compatible content parts."""
-    parts: list[dict[str, Any]] = []
-    source = block.get("source") or {}
-    src_type = source.get("type")
-    media_type = source.get("media_type", "application/octet-stream")
-
-    if src_type == "text":
-        parts.append({"type": "text", "text": str(source.get("data", ""))})
-    elif src_type == "base64":
-        data = source.get("data", "")
-        if media_type.startswith("image/"):
-            parts.append({"type": "image_url", "image_url": {"url": f"data:{media_type};base64,{data}"}})
-        else:
-            # Non-image base64: include as text with metadata
-            parts.append({"type": "text", "text": f"[Document: {media_type}, {len(data)} chars base64]"})
-    elif src_type == "url":
-        parts.append({"type": "text", "text": f"[Document URL: {source.get('url', '')}]"})
-    else:
-        strict = os.environ.get("CLAUDEOP_STRICT_BLOCKS") == "1"
-        if strict:
-            raise BridgeRequestError(400, f"unsupported Anthropic document source type: {src_type}")
-        parts.append({"type": "text", "text": f"[Unsupported document source: {src_type}]"})
-
-    # Preserve citations if present (as text annotation)
-    citations = block.get("citations")
-    if citations:
-        cite_text = "\n".join(f"[Citation: {c}]" for c in citations)
-        parts.append({"type": "text", "text": cite_text})
-
-    return parts
-
-
 def openai_content(content: Any) -> Any:
-    """Convert text and the common Anthropic image/document shape to OpenAI content."""
+    """Convert text and the common Anthropic image shape to OpenAI content."""
     if isinstance(content, str):
         return content
     if not isinstance(content, list):
@@ -114,25 +92,13 @@ def openai_content(content: Any) -> Any:
                 })
             else:
                 raise BridgeRequestError(400, "unsupported Anthropic image source")
-        elif kind == "document":
-            parts.extend(_handle_document_block(block))
         elif kind in {"thinking", "redacted_thinking"}:
             continue
         elif kind == "tool_result":
             # Tool results are split into role=tool messages by translate_messages.
             continue
-        elif kind == "tool_reference":
-            strict = os.environ.get("CLAUDEOP_STRICT_BLOCKS") == "1"
-            if strict:
-                raise BridgeRequestError(400, "tool_reference not supported by OpenCode Chat Completions")
-            # Fallback: include as text hint
-            parts.append({"type": "text", "text": f"[Tool reference: {block.get('name', 'unknown')}]"})
         elif kind:
-            strict = os.environ.get("CLAUDEOP_STRICT_BLOCKS") == "1"
-            if strict:
-                raise BridgeRequestError(400, f"unsupported Anthropic content block: {kind}")
-            # Lenient: include as text hint
-            parts.append({"type": "text", "text": f"[Unsupported block: {kind}]"})
+            raise BridgeRequestError(400, f"unsupported Anthropic content block: {kind}")
 
     if not parts:
         return ""
@@ -146,10 +112,16 @@ def tool_arguments(value: Any) -> str:
 
 
 def translate_messages(messages: list[dict[str, Any]], system: Any) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
+    # Claude Code may append role=system messages AFTER user messages
+    # (environment reminders). VLLM rejects those with
+    # "400 System message must be at the beginning", so every system text is
+    # merged into a single leading system message.
+    system_parts: list[str] = []
     system_text = text_from_content(system)
     if system_text:
-        result.append({"role": "system", "content": system_text})
+        system_parts.append(system_text)
+
+    result: list[dict[str, Any]] = []
 
     for message in messages:
         role = message.get("role", "user")
@@ -159,7 +131,7 @@ def translate_messages(messages: list[dict[str, Any]], system: Any) -> list[dict
         if role == "system":
             text = text_from_content(content)
             if text:
-                result.append({"role": "system", "content": text})
+                system_parts.append(text)
             continue
 
         if role == "assistant":
@@ -191,7 +163,7 @@ def translate_messages(messages: list[dict[str, Any]], system: Any) -> list[dict
             result.append(assistant)
             continue
 
-        # A user message may contain ordinary text, images, documents, and tool results.
+        # A user message may contain ordinary text and one or more tool results.
         text_parts = []
         for block in blocks:
             if not isinstance(block, dict):
@@ -203,24 +175,20 @@ def translate_messages(messages: list[dict[str, Any]], system: Any) -> list[dict
                     "tool_call_id": block.get("tool_use_id", ""),
                     "content": text_from_content(block.get("content", "")),
                 })
-            elif kind in {"text", "image", "document"}:
+            elif kind in {"text", "image"}:
                 text_parts.append(block)
-            elif kind == "tool_reference":
-                # Include tool_reference as a text hint in the user message
-                text_parts.append({"type": "text", "text": f"[Tool reference: {block.get('name', 'unknown')}]"})
             elif kind in {"thinking", "redacted_thinking"}:
                 continue
             elif kind:
-                strict = os.environ.get("CLAUDEOP_STRICT_BLOCKS") == "1"
-                if strict:
-                    raise BridgeRequestError(400, f"unsupported Anthropic content block: {kind}")
-                text_parts.append({"type": "text", "text": f"[Unsupported block: {kind}]"})
+                raise BridgeRequestError(400, f"unsupported Anthropic content block: {kind}")
 
         if text_parts:
             result.append({"role": "user", "content": openai_content(text_parts)})
         elif not any(isinstance(block, dict) and block.get("type") == "tool_result" for block in blocks):
             result.append({"role": "user", "content": ""})
 
+    if system_parts:
+        result.insert(0, {"role": "system", "content": "\n\n".join(system_parts)})
     return result
 
 
@@ -256,6 +224,9 @@ def build_chat_request(request: dict[str, Any], model: str) -> dict[str, Any]:
             payload[target] = request[source]
     if request.get("stop_sequences"):
         payload["stop"] = request["stop_sequences"]
+    if payload["stream"]:
+        # Lets the bridge report real output-token usage on the SSE path.
+        payload["stream_options"] = {"include_usage": True}
 
     tools = translate_tools(request.get("tools"))
     if tools:
@@ -345,15 +316,22 @@ def parse_upstream_error(error: urllib.error.HTTPError) -> tuple[int, str]:
         return error.code, str(error)
 
 
+def upstream_chat_url(base_url: str) -> str:
+    """Normalise a VLLM base URL (with or without trailing /v1)."""
+    base = (base_url or "").rstrip("/")
+    if base.endswith("/v1"):
+        return base + "/chat/completions"
+    return base + "/v1/chat/completions"
+
+
 class BridgeHandler(BaseHTTPRequestHandler):
     upstream_url = ""
     api_key = ""
     model = ""
-    session_id = ""
 
     def log_message(self, format: str, *args: Any) -> None:
         # Do not log request paths with query strings or any request data.
-        sys.stderr.write("claudeop-bridge: " + (format % args) + "\n")
+        sys.stderr.write("clauden-bridge: " + (format % args) + "\n")
 
     def _send_json(self, status: int, body: dict[str, Any]) -> None:
         data = json_bytes(body)
@@ -364,22 +342,23 @@ class BridgeHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _debug(self, message: str) -> None:
-        if os.environ.get("CLAUDEOP_DEBUG") == "1":
-            sys.stderr.write(f"claudeop-bridge: {message}\\n")
+        if os.environ.get("CLAUDEN_DEBUG") == "1":
+            sys.stderr.write(f"clauden-bridge: {message}\n")
             sys.stderr.flush()
 
     def _open_upstream(self, payload: dict[str, Any]):
+        headers = {
+            "Accept": "text/event-stream" if payload.get("stream") else "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "clauden/1.0",
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         request = urllib.request.Request(
             self.upstream_url,
             data=json_bytes(payload),
             method="POST",
-            headers={
-                "Accept": "text/event-stream" if payload.get("stream") else "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-                "User-Agent": "claudeop/1.0",
-                "x-opencode-session": self.session_id,
-            },
+            headers=headers,
         )
         try:
             return urllib.request.urlopen(request, timeout=600)
@@ -387,7 +366,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             status, message = parse_upstream_error(error)
             raise UpstreamError(status, message) from error
         except urllib.error.URLError as error:
-            raise UpstreamError(502, f"OpenCode Go connection failed: {error.reason}") from error
+            raise UpstreamError(502, f"VLLM connection failed: {error.reason}") from error
 
     def do_HEAD(self) -> None:
         # Claude Code performs a lightweight health probe before Messages.
@@ -404,7 +383,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         # Claude Code may probe the selected model before sending Messages.
         # Keep that local compatibility probe independent of the upstream
-        # OpenCode catalogue and never forward the API key for it.
+        # VLLM catalogue and never forward the API key for it.
         path = urlsplit(self.path).path
         if path == "/api/hello":
             self._send_json(200, {"status": "ok"})
@@ -419,7 +398,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 "id": model_id,
                 "object": "model",
                 "created": 0,
-                "owned_by": "opencode",
+                "owned_by": "clauden",
                 "display_name": model_id,
             } if path != "/v1/models" else {
                 "object": "list",
@@ -428,7 +407,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     "id": model_id,
                     "object": "model",
                     "created": 0,
-                    "owned_by": "opencode",
+                    "owned_by": "clauden",
                     "display_name": model_id,
                 }],
                 "has_more": False,
@@ -447,7 +426,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             if not isinstance(request, dict):
                 raise BridgeRequestError(400, "request body must be a JSON object")
             # Claude Code's model label is a local compatibility value. The
-            # bridge always pins the upstream request to the selected OpenCode
+            # bridge always pins the upstream request to the selected VLLM
             # model passed at startup.
             model = self.model or str(request.get("model") or "")
             payload = build_chat_request(request, model)
@@ -524,6 +503,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 for choice in chunk.get("choices") or []:
                     finish_reason = choice.get("finish_reason") or finish_reason
                     delta = choice.get("delta") or {}
+                    # reasoning_content (reasoning models) is intentionally
+                    # dropped; only the final answer text is forwarded.
                     text = delta.get("content")
                     if isinstance(text, str) and text:
                         if text_index is None:
@@ -600,18 +581,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
-    parser.add_argument("--base-url", default=os.environ.get("CLAUDEOP_BASE_URL", "https://opencode.ai/zen/go/v1"))
-    parser.add_argument("--api-key", default=os.environ.get("CLAUDEOP_API_KEY", ""))
+    parser.add_argument("--base-url", default=os.environ.get("CLAUDEN_BASE_URL", "http://127.0.0.1:8000"))
+    parser.add_argument("--api-key", default=os.environ.get("CLAUDEN_API_KEY", ""))
     parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
-    if not args.api_key:
-        print("claudeop-bridge: CLAUDEOP_API_KEY is required", file=sys.stderr)
-        return 2
 
-    BridgeHandler.upstream_url = args.base_url.rstrip("/") + "/chat/completions"
+    BridgeHandler.upstream_url = upstream_chat_url(args.base_url)
     BridgeHandler.api_key = args.api_key
     BridgeHandler.model = args.model
-    BridgeHandler.session_id = f"claudeop-{uuid.uuid4().hex}"
     server = ThreadingHTTPServer(("127.0.0.1", args.port), BridgeHandler)
     server.daemon_threads = True
     print(f"PORT={server.server_address[1]}", flush=True)
