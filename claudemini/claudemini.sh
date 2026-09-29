@@ -4,7 +4,7 @@
 # this one filters the catalogue DOWN TO Gemini, because one CLIProxyAPI instance
 # serves GPT and Gemini side by side and "newest model" would otherwise pick a GPT.
 #
-# Install:  source /path/to/claudemini.sh   (from ~/.zshrc or ~/.bashrc)
+# Install:  source /path/to/claudex/claudemini/claudemini.sh   (from ~/.zshrc or ~/.bashrc)
 # Works in zsh and bash.
 #
 # Environment knobs (all optional):

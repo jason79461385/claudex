@@ -4,7 +4,7 @@
 # this one filters the catalogue DOWN TO Gemini, because one CLIProxyAPI instance
 # serves GPT and Gemini side by side and "newest model" would otherwise pick a GPT.
 #
-# Install:  add  . $HOME\.claudex\claudemini.ps1   to your $PROFILE
+# Install:  add  . $HOME\.claudex\claudemini\claudemini.ps1   to your $PROFILE
 # Works in Windows PowerShell 5.1 and PowerShell 7+.
 #
 # Environment knobs (all optional):

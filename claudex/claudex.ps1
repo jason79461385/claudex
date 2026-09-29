@@ -1,6 +1,6 @@
 # claudex.ps1 - run Claude Code against a GPT model served by a local CLIProxyAPI.
 #
-# Install:  add  . $HOME\.claudex\claudex.ps1   to your $PROFILE
+# Install:  add  . $HOME\.claudex\claudex\claudex.ps1   to your $PROFILE
 # Works in Windows PowerShell 5.1 and PowerShell 7+.
 #
 # Environment knobs (all optional):

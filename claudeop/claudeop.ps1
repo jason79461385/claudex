@@ -6,7 +6,7 @@
 # The bridge (claudeop_bridge.py, stdlib only) runs on 127.0.0.1 for this
 # invocation only and is stopped afterwards.
 #
-# Install:  add  . $HOME\.claudex\claudeop.ps1   to your $PROFILE
+# Install:  add  . $HOME\.claudex\claudeop\claudeop.ps1   to your $PROFILE
 # Requires: Python 3 on PATH (python). The bridge script must sit next to this
 #           file, or set $env:CLAUDEOP_BRIDGE_SCRIPT to its absolute path.
 # Works in Windows PowerShell 5.1 and PowerShell 7+.

@@ -6,7 +6,7 @@
 # The bridge is localhost-only and pins the upstream request to the
 # selected VLLM model.
 #
-# Install:  add  . $HOME\.claudex\clauden.ps1   to your $PROFILE
+# Install:  add  . $HOME\.claudex\clauden\clauden.ps1   to your $PROFILE
 # Requires: Python 3 on PATH (python). The bridge script must sit next to this
 #           file, or set $env:CLAUDEN_BRIDGE_SCRIPT to its absolute path.
 # Works in Windows PowerShell 5.1 and PowerShell 7+.

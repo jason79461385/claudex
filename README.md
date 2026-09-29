@@ -37,6 +37,10 @@
 
 ### 步驟 1：安裝 CLIProxyAPI
 
+> **懶人包**：`install.sh --with-proxy`（macOS/Linux）或 `install.ps1 -WithProxy`（Windows）
+> 會自動做掉步驟 1–3——偵測已在跑的 proxy（有就不碰）、裝執行檔、寫好本機限定設定、設成開機自動啟動。
+> 登入（步驟 4）仍要手動，因為 OAuth 要開瀏覽器。
+
 **macOS**
 
 ```bash
@@ -56,7 +60,7 @@ Arch 系可改用 AUR：`yay -S cli-proxy-api-bin`
 
 **Windows**
 
-1. 到 [CLIProxyAPI releases](https://github.com/router-for-me/CLIProxyAPI/releases) 下載 `CLIProxyAPI-windows-amd64.exe`（檔名依版本略有不同），放到固定目錄，例如 `C:\Tools\CLIProxyAPI\`。
+1. 到 [CLIProxyAPI releases](https://github.com/router-for-me/CLIProxyAPI/releases) 下載 `CLIProxyAPI_<版本>_windows_amd64.zip`，解壓出 `cli-proxy-api.exe` 放到固定目錄，例如 `C:\Tools\CLIProxyAPI\`（或跑 `install.ps1 -WithProxy` 自動下載到 `$HOME\.claudex\bin\`）。
 2. 或使用桌面 GUI [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI)，登入與改設定都在視窗裡完成。
 3. 另外安裝 [Python 3](https://www.python.org/downloads/windows/)（安裝時勾選 **Add python.exe to PATH**，`claudeop` / `clauden` 的 bridge 需要它），以及 [Claude Code for Windows](https://code.claude.com/docs/en/windows-setup)（原生安裝或 WSL 二選一；本 repo 的 `*.ps1` 是給**原生 PowerShell** 用的）。
 4. CLIProxyAPI 的設定檔與 `~/.cli-proxy-api/` 憑證目錄位置和 Linux 相同（`%USERPROFILE%\.cli-proxy-api`）；`host` 同樣要設成 `127.0.0.1`（見步驟 2）。
@@ -103,6 +107,18 @@ systemctl --user start cli-proxy-api
 # 不想常駐，直接前景跑也可以
 cliproxyapi
 ```
+
+`--with-proxy` / `-WithProxy` 幫你設好的開機自啟方式（重開機後 proxy 自己起來並開始監聽 `127.0.0.1:8317`）：
+
+| 平台 | 自啟機制 |
+|---|---|
+| macOS（brew） | `brew services`（launchd，登入自動啟動＋crash 自動重起） |
+| macOS（無 brew，managed 安裝） | `~/Library/LaunchAgents/com.claudex.cliproxyapi.plist` |
+| Linux（managed 安裝） | user systemd unit `claudex-proxy.service`（登入自動啟動；無登入開機也要跑再加 `sudo loginctl enable-linger <user>`） |
+| Linux（沿用既有安裝） | 沿用該安裝自帶的 service；裝完記得 `enable` |
+| Windows | 排程工作 `CLIProxyAPI`（登入自動啟動，失敗自動重試） |
+
+登入（步驟 4）之後**一定要重啟服務**才會載入新憑證，各平台指令見步驟 4 末尾。
 
 ### 步驟 4：登入你要使用的模型服務
 
@@ -151,33 +167,71 @@ curl -s -H "Authorization: Bearer sk-dummy" http://127.0.0.1:8317/v1/models
 
 ### 步驟 6：放置 wrapper（macOS / Linux）
 
-這個 repo 不需要 `npm install`、編譯或安裝 daemon；四個 `.sh` 檔是 wrapper，`claudeop_bridge.py` / `clauden_bridge.py` 會在需要時暫時啟動在 localhost。你可以選一種方式取得檔案：
+這個 repo 不需要 `npm install`、編譯或安裝 daemon。每條路線自成一個資料夾，裡面是 wrapper（`.sh`）和該路線需要的 bridge（`.py`，會在需要時暫時啟動在 localhost）：
 
-**方式 A：clone repo（推薦）**
+```
+claudex/          # GPT 路線（CLIProxyAPI）
+  claudex.sh
+claudemini/       # Gemini 路線（同一個 CLIProxyAPI）
+  claudemini.sh
+claudeop/         # OpenCode Go 路線
+  claudeop.sh
+  claudeop_bridge.py
+clauden/          # 自架 VLLM 路線
+  clauden.sh
+  clauden_bridge.py
+```
+
+你可以選一種方式取得檔案：
+
+**方式 A：一鍵安裝（推薦）** — 複製檔案並自動把 `source` 加到你的 shell 設定，冪等（跑多次不會重複），改前會先備份：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jason79461385/claudex/main/install.sh | bash
+```
+
+要連 CLIProxyAPI 一起裝好（含開機自啟），加 `--with-proxy`（會先偵測 8317 是否已有服務，有就不動）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/jason79461385/claudex/main/install.sh | bash -s -- --with-proxy
+```
+
+常用選項（先 clone 再跑也可以：`git clone ... ~/.claudex && ~/.claudex/install.sh ...`）：
+
+```bash
+~/.claudex/install.sh --routes claudex,clauden   # 只裝這兩條路線
+~/.claudex/install.sh --rc ~/.bashrc             # 寫到 bashrc 而非自動偵測
+~/.claudex/install.sh --uninstall                # 移除設定（檔案保留）
+~/.claudex/install.sh --uninstall --remove-files # 移除設定並刪除檔案
+```
+
+**方式 B：clone repo**
 
 ```bash
 git clone https://github.com/jason79461385/claudex.git ~/.claudex
 ```
 
-**方式 B：repo 已經在本機**
+這樣 `~/.claudex` 底下的結構和上面完全一樣，更新時只要 `git pull`。然後手動加下面的 `source` 行。
+
+**方式 C：repo 已經在本機**
 
 ```bash
-mkdir -p ~/.claudex
-cp /path/to/claudex/claudex.sh ~/.claudex/
-cp /path/to/claudex/claudemini.sh ~/.claudex/
-cp /path/to/claudex/claudeop.sh ~/.claudex/
-cp /path/to/claudex/claudeop_bridge.py ~/.claudex/
-cp /path/to/claudex/clauden.sh ~/.claudex/
-cp /path/to/claudex/clauden_bridge.py ~/.claudex/
+mkdir -p ~/.claudex/claudex ~/.claudex/claudemini ~/.claudex/claudeop ~/.claudex/clauden
+cp /path/to/claudex/claudex/claudex.sh ~/.claudex/claudex/
+cp /path/to/claudex/claudemini/claudemini.sh ~/.claudex/claudemini/
+cp /path/to/claudex/claudeop/claudeop.sh ~/.claudex/claudeop/
+cp /path/to/claudex/claudeop/claudeop_bridge.py ~/.claudex/claudeop/
+cp /path/to/claudex/clauden/clauden.sh ~/.claudex/clauden/
+cp /path/to/claudex/clauden/clauden_bridge.py ~/.claudex/clauden/
 ```
 
 **zsh**（macOS 預設）— 加到 `~/.zshrc`：
 
 ```zsh
-source ~/.claudex/claudex.sh
-source ~/.claudex/claudemini.sh
-source ~/.claudex/claudeop.sh
-source ~/.claudex/clauden.sh
+source ~/.claudex/claudex/claudex.sh
+source ~/.claudex/claudemini/claudemini.sh
+source ~/.claudex/claudeop/claudeop.sh
+source ~/.claudex/clauden/clauden.sh
 ```
 
 只需要某一條路線時，可以只 source 對應檔案。**bash** — 將相同內容加到 `~/.bashrc`。
@@ -186,22 +240,38 @@ source ~/.claudex/clauden.sh
 
 ### 步驟 6（Windows）：放置 wrapper（PowerShell）
 
-Windows 用的是 `*.ps1`（共四個），bridge 照樣是同一個 `*.py`（需 Python 3）：
+Windows 用的是各資料夾裡的 `*.ps1`（共四個），bridge 照樣是同一個 `*.py`（需 Python 3；`claudeop_bridge.py` 在 `claudeop/` 裡，`clauden_bridge.py` 在 `clauden/` 裡，**不要拆散**，否則 wrapper 找不到 bridge）：
+
+**方式 A：一鍵安裝（推薦）** — 複製檔案並自動改 `$PROFILE`，冪等，改前會先備份：
+
+```powershell
+git clone https://github.com/jason79461385/claudex.git $HOME\.claudex
+& $HOME\.claudex\install.ps1
+```
+
+要連 CLIProxyAPI 一起裝好（含登入自動啟動），改跑 `& $HOME\.claudex\install.ps1 -WithProxy`（會先偵測 8317 是否已有服務，有就不動）。
+
+若 ExecutionPolicy 擋下腳本，改用 `powershell -ExecutionPolicy Bypass -File $HOME\.claudex\install.ps1`。常用選項：`-Routes claudex,clauden` 只裝部分路線；`-Uninstall` / `-Uninstall -RemoveFiles` 移除設定。
+
+**方式 B：手動放置**
 
 ```powershell
 # 1. 取得檔案（選一種）
 git clone https://github.com/jason79461385/claudex.git $HOME\.claudex
-#  或手動複製 claudex.ps1 / claudemini.ps1 / claudeop.ps1 / clauden.ps1
-#  以及 claudeop_bridge.py / clauden_bridge.py 到 $HOME\.claudex\
+#  或手動複製，目錄結構照抄：
+#  claudex\claudex.ps1 / claudemini\claudemini.ps1 /
+#  claudeop\claudeop.ps1 + claudeop\claudeop_bridge.py /
+#  clauden\clauden.ps1 + clauden\clauden_bridge.py
+#  到 $HOME\.claudex\ 底下
 
 # 2. 允許執行本機腳本（只需做一次，以管理員身分跑）：
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 # 3. 把下面四行加到 $PROFILE（先跑 notepad $PROFILE，不存在會自動建立）：
-. $HOME\.claudex\claudex.ps1
-. $HOME\.claudex\claudemini.ps1
-. $HOME\.claudex\claudeop.ps1
-. $HOME\.claudex\clauden.ps1
+. $HOME\.claudex\claudex\claudex.ps1
+. $HOME\.claudex\claudemini\claudemini.ps1
+. $HOME\.claudex\claudeop\claudeop.ps1
+. $HOME\.claudex\clauden\clauden.ps1
 ```
 
 只需要某一條路線時，可以只 dot-source 對應檔案。然後關掉重開一個 PowerShell 視窗。
@@ -504,7 +574,7 @@ export CLAUDEX_MODEL=gpt-5.6-sol   # 加到 ~/.zshrc，固定住
 ```zsh
 export CLAUDEX_MAX_CONTEXT_TOKENS=1000000
 export CLAUDEX_SUBAGENT_MODEL=gpt-5.6-terra  # 預設值，明列以固定行為
-source ~/.claudex/claudex.sh
+source ~/.claudex/claudex/claudex.sh
 ```
 
 `CLAUDEX_MAX_CONTEXT_TOKENS` 只告訴 Claude Code 何時進行 auto-compaction，並不會提高 proxy 或 upstream endpoint 的真實請求上限。若小型 diff 的全新 session 仍收到 `Prompt is too long`，應視為該 route／proxy adapter 的實際限制與宣稱的 1M 不一致，而非提高這個值。
@@ -514,7 +584,7 @@ Gemini 路線預設已設成 1M；若實際 route 不支援，請改成已確認
 ```zsh
 export CLAUDEMINI_MAX_CONTEXT_TOKENS=1000000
 export CLAUDEMINI_SUBAGENT_MODEL=gemini-3.1-pro-preview
-source ~/.claudex/claudemini.sh
+source ~/.claudex/claudemini/claudemini.sh
 ```
 
 `CLAUDEMINI_MAX_CONTEXT_TOKENS` 同樣只影響 auto-compaction，不會替 upstream 增加真實 context 上限。
@@ -525,7 +595,7 @@ OpenCode Go 的實際上限依模型與帳戶而定；確認後才設定：
 # 只有拿到 OpenCode Go 實際上限後才填入：
 # export CLAUDEOP_MAX_CONTEXT_TOKENS=<confirmed-value>
 export CLAUDEOP_SUBAGENT_MODEL=deepseek-v4-pro
-source ~/.claudex/claudeop.sh
+source ~/.claudex/claudeop/claudeop.sh
 ```
 
 這個值只影響 auto-compaction，不會替 OpenCode Go 增加真實 context 上限。
@@ -593,10 +663,10 @@ clauden --print "Reply with exactly: OK"
 先跑 `claudeop --models`，再用清單中實際出現的 id 設定 `CLAUDEOP_MODEL` 或傳 `--model`。OpenCode Go 的模型清單會變動，不要自行拼接模型名稱。
 
 **仍看到 `[claude-code:unrecognized_model]` 或只有 generic model error**
-重新執行 `source ~/.claudex/claudeop.sh`。非 Claude route 會用 `CLAUDEOP_FRONTEND_MODEL`（預設 `claude-sonnet-5`）作為 Claude Code 的本地 label，再由 bridge 轉送實際 OpenCode model。若仍失敗，可用 `CLAUDEOP_DEBUG=1 claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"` 顯示不含 request body/key 的 bridge diagnostics。
+重新執行 `source ~/.claudex/claudeop/claudeop.sh`。非 Claude route 會用 `CLAUDEOP_FRONTEND_MODEL`（預設 `claude-sonnet-5`）作為 Claude Code 的本地 label，再由 bridge 轉送實際 OpenCode model。若仍失敗，可用 `CLAUDEOP_DEBUG=1 claudeop --model deepseek-v4-pro --print "Reply with exactly: OK"` 顯示不含 request body/key 的 bridge diagnostics。
 
 **`claudeop: bridge script not found` / `clauden: bridge script not found`**
-把 `claudeop.sh` 和 `claudeop_bridge.py`（或 `clauden.sh` 和 `clauden_bridge.py`）放在同一個目錄，或設定 `CLAUDEOP_BRIDGE_SCRIPT` / `CLAUDEN_BRIDGE_SCRIPT` 為絕對路徑。Windows 上還要確認 `python` 在 PATH 裡（`python --version` 有回應）。
+把 `claudeop/` 整個資料夾（`claudeop.sh` + `claudeop_bridge.py`）或 `clauden/` 整個資料夾（`clauden.sh` + `clauden_bridge.py`）一起複製，不要拆散；或設定 `CLAUDEOP_BRIDGE_SCRIPT` / `CLAUDEN_BRIDGE_SCRIPT` 為絕對路徑。Windows 上還要確認 `python` 在 PATH 裡（`python --version` 有回應）。
 
 **`clauden: cannot reach VLLM` / `clauden: no model selected`**
 VLLM 沒跑或位址錯誤。先跑 `curl http://127.0.0.1:8000/v1/models` 確認；位址不同時設定 `CLAUDEN_BASE_URL`。離線固定模型時設定 `CLAUDEN_MODEL`。
@@ -702,7 +772,17 @@ CLAUDE_CODE_SESSION_NAME=worker claudex    # 工作方
 
 ## 移除
 
+用安裝器移除最乾淨（會刪掉管理的設定區塊，`--remove-files` / `-RemoveFiles` 才會刪檔案）：
+
 ```bash
+~/.claudex/install.sh --uninstall --remove-files   # macOS / Linux
+```
+
+```powershell
+& $HOME\.claudex\install.ps1 -Uninstall -RemoveFiles  # Windows
+```
+
+或手動：
 # 1. 從 ~/.zshrc / ~/.bashrc / $PROFILE 移除那行 source
 # 2. 停掉服務
 brew services stop cliproxyapi        # macOS
@@ -723,7 +803,9 @@ rm -rf ~/.cli-proxy-api
 | macOS 26.4 / arm64 / zsh | ✅ 完整實測 |
 | bash | ✅ `claudex.sh` 全功能實測（與 zsh 行為一致） |
 | Linux | ⚠️ 安裝指令引自官方文件，未實機驗證 |
-| Windows / PowerShell | ⚠️ 四個 `*.ps1` 已照邏輯移植（含 bridge 啟動），**未在 Windows 實機執行過** |
+| Windows / PowerShell | ✅ 五個 `*.ps1` 皆在 pwsh 7 下實測載入、`--models` 邏輯與安裝/移除流程；⚠️ 未在真正的 Windows 機器上跑過 |
+| `install.sh --with-proxy` | ✅ macOS 沙盒實測三條路徑：已在跑（不碰）、brew 安裝＋自啟、無 brew 下載＋launchd＋自啟（含端到端 `/v1/models` 回應）；Linux 用 stub 驗證下載＋config＋systemd unit 產生 |
+| `install.ps1 -WithProxy` | ✅ pwsh 7 下實測：已在跑（不碰）、本地 zip 安裝＋config 產生＋無 scheduler 時優雅降級；⚠️ 真 Windows 上的下載＋排程註冊未實機驗證 |
 | Docker | ⚠️ 指令引自官方文件，未實機驗證 |
 | OpenCode Go / `claudeop` | ⚠️ `/v1/models` endpoint 已確認可連線；需要使用者 API key 才能做端到端驗證 |
 | 自架 VLLM / `clauden` | ⚠️ bridge 邏輯與 `claudeop` 同源；需使用者自備 VLLM server 驗證 |

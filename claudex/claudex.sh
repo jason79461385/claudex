@@ -1,6 +1,6 @@
 # claudex.sh — run Claude Code against a GPT model served by a local CLIProxyAPI.
 #
-# Install:  source /path/to/claudex.sh   (from ~/.zshrc or ~/.bashrc)
+# Install:  source /path/to/claudex/claudex/claudex.sh   (from ~/.zshrc or ~/.bashrc)
 # Works in zsh and bash.
 #
 # Environment knobs (all optional):

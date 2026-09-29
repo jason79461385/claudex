@@ -4,7 +4,7 @@
 # models, including DeepSeek V4, use the bundled localhost bridge to translate
 # Claude Code's Messages requests to OpenCode's Chat Completions endpoint.
 #
-# Install:  source /path/to/claudeop.sh   (from ~/.zshrc or ~/.bashrc)
+# Install:  source /path/to/claudex/claudeop/claudeop.sh   (from ~/.zshrc or ~/.bashrc)
 # Works in zsh and bash.
 #
 # Environment knobs (all optional except CLAUDEOP_API_KEY):

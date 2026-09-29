@@ -6,7 +6,7 @@
 # The bridge is localhost-only and pins the upstream request to the
 # selected VLLM model.
 #
-# Install:  source /path/to/clauden.sh   (from ~/.zshrc or ~/.bashrc)
+# Install:  source /path/to/claudex/clauden/clauden.sh   (from ~/.zshrc or ~/.bashrc)
 # Works in zsh and bash.
 #
 # Environment knobs (all optional):
