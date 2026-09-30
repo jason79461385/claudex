@@ -210,7 +210,8 @@ function clauden {
         $toolSearch = if ($null -ne $env:CLAUDEN_TOOL_SEARCH) { $env:CLAUDEN_TOOL_SEARCH } else { 'true' }
 
         $names = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
-                   'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+                   'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
+                   'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
                    'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT',
                    'CLAUDE_CODE_ALWAYS_ENABLE_EFFORT', 'CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY',
                    'ENABLE_TOOL_SEARCH')
@@ -222,6 +223,9 @@ function clauden {
             Remove-Item 'Env:ANTHROPIC_API_KEY' -ErrorAction SilentlyContinue
             $env:ANTHROPIC_AUTH_TOKEN = 'clauden-local-bridge'
             $env:CLAUDE_CODE_SUBAGENT_MODEL = $frontend
+            # This route pins its own subagent model; a stale FORCE value
+            # from another route must not leak into this session.
+            Remove-Item 'Env:CLAUDE_CODE_SUBAGENT_MODEL_FORCE' -ErrorAction SilentlyContinue
             $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS = $maxCtx
             $env:CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT = '1'
             $env:CLAUDE_CODE_ALWAYS_ENABLE_EFFORT = '1'

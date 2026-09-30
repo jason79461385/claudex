@@ -7,18 +7,23 @@
 #   CLAUDEX_BASE_URL        proxy address           (default http://127.0.0.1:8317)
 #   CLAUDEX_API_KEY         proxy api key           (default sk-dummy)
 #   CLAUDEX_MODEL           pin the primary model, skips auto-detection
-#   CLAUDEX_SUBAGENT_MODEL  model for spawned agents (default gpt-5.6-terra)
+#   CLAUDEX_INCLUDE         regex a model id MUST match to be usable (default gpt|codex)
+#   CLAUDEX_SUBAGENT_MODEL  model for spawned agents (default gpt-6-luna)
 #   CLAUDEX_MAX_CONTEXT_TOKENS known context window; unset preserves Claude Code's default
-#   CLAUDEX_FALLBACK_MODEL  used when the proxy is unreachable (default gpt-5.6-sol)
+#   CLAUDEX_FALLBACK_MODEL  used when the proxy is unreachable (default gpt-6-luna)
 #   CLAUDEX_EXCLUDE         regex of model ids to ignore
 #   CLAUDEX_TOOL_SEARCH     true|false              (default true)
 
 function Get-ClaudexModels {
-    <#  Every model the proxy serves, newest first.
+    <#  GPT models the proxy serves, newest first.
         Output objects: Id, Released (YYYY-MM-DD), Usable ($true/$false).
-        Same-day releases sort alphabetically so the pick is deterministic. #>
+        The positive filter is what keeps this route on GPT: the same proxy
+        serves gemini-* and claude-* side by side, so "newest usable id" alone
+        would silently switch families. Same-day releases sort alphabetically
+        so the pick is deterministic. #>
     $base = if ($env:CLAUDEX_BASE_URL) { $env:CLAUDEX_BASE_URL } else { 'http://127.0.0.1:8317' }
     $key  = if ($env:CLAUDEX_API_KEY)  { $env:CLAUDEX_API_KEY }  else { 'sk-dummy' }
+    $keep = if ($env:CLAUDEX_INCLUDE)  { $env:CLAUDEX_INCLUDE }  else { 'gpt|codex' }
     $skip = if ($env:CLAUDEX_EXCLUDE)  { $env:CLAUDEX_EXCLUDE }  else {
         'image|audio|tts|whisper|transcribe|embed|moderation|realtime|review|search' }
 
@@ -44,7 +49,7 @@ function Get-ClaudexModels {
             [pscustomobject]@{
                 Id       = $_.id
                 Released = $day
-                Usable   = [bool]($_.id -notmatch $skip)
+                Usable   = [bool]($_.id -match $keep -and $_.id -notmatch $skip)
             }
         }
 }
@@ -70,10 +75,14 @@ function claudex {
         $chosen = if ($env:CLAUDEX_MODEL) { $env:CLAUDEX_MODEL }
                   elseif ($usable.Count -gt 0) { $usable[0].Id }
                   elseif ($env:CLAUDEX_FALLBACK_MODEL) { $env:CLAUDEX_FALLBACK_MODEL }
-                  else { 'gpt-5.6-sol' }
+                  else { 'gpt-6-luna' }
+        if ($usable.Count -eq 0) {
+            Write-Warning 'claudex: the proxy serves no GPT model. Add a credential, then restart the service.'
+            $showAll = $true
+        }
         foreach ($m in $models) {
             if (-not $m.Usable) {
-                if ($showAll) { '  {0,-24} {1}   (not a chat model, skipped)' -f $m.Id, $m.Released }
+                if ($showAll) { '  {0,-24} {1}   (not a usable GPT chat model, skipped)' -f $m.Id, $m.Released }
             }
             elseif ($m.Id -eq $chosen) { '  {0,-24} {1}   <- claudex uses this' -f $m.Id, $m.Released }
             else                        { '  {0,-24} {1}'                        -f $m.Id, $m.Released }
@@ -99,29 +108,38 @@ function claudex {
             $first = @(Get-ClaudexModels) | Where-Object { $_.Usable } | Select-Object -First 1
             if ($first) { $model = $first.Id }
             elseif ($env:CLAUDEX_FALLBACK_MODEL) { $model = $env:CLAUDEX_FALLBACK_MODEL }
-            else { $model = 'gpt-5.6-sol' }
+            else { $model = 'gpt-6-luna' }
         }
     }
 
-    $subagentModel = if ($env:CLAUDEX_SUBAGENT_MODEL) { $env:CLAUDEX_SUBAGENT_MODEL } else { 'gpt-5.6-terra' }
+    $subagentModel = if ($env:CLAUDEX_SUBAGENT_MODEL) { $env:CLAUDEX_SUBAGENT_MODEL } else { 'gpt-6-luna' }
     $maxContextTokens = if ($env:CLAUDEX_MAX_CONTEXT_TOKENS) {
         $env:CLAUDEX_MAX_CONTEXT_TOKENS
     } else {
         $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS
     }
 
-    # Set the seven variables for this invocation only, then put the shell back.
-    $names = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_SUBAGENT_MODEL',
-               'CLAUDE_CODE_MAX_CONTEXT_TOKENS', 'CLAUDE_CODE_ALWAYS_ENABLE_EFFORT',
+    # Set the route's variables for this invocation only, then put the shell back.
+    # ANTHROPIC_API_KEY is cleared so the proxy credential (AUTH_TOKEN) is the
+    # only auth source; FORCE / DISABLE vars from other routes are cleared so
+    # each route's subagent and window behaviour stays deterministic.
+    $names = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
+               'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
+               'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+               'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT',
+               'CLAUDE_CODE_ALWAYS_ENABLE_EFFORT',
                'CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY', 'ENABLE_TOOL_SEARCH')
     $saved = @{}
     foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
 
     try {
         $env:ANTHROPIC_BASE_URL   = if ($env:CLAUDEX_BASE_URL) { $env:CLAUDEX_BASE_URL } else { 'http://127.0.0.1:8317' }
+        Remove-Item 'Env:ANTHROPIC_API_KEY' -ErrorAction SilentlyContinue
         $env:ANTHROPIC_AUTH_TOKEN = if ($env:CLAUDEX_API_KEY)  { $env:CLAUDEX_API_KEY }  else { 'sk-dummy' }
         $env:CLAUDE_CODE_SUBAGENT_MODEL           = $subagentModel
+        Remove-Item 'Env:CLAUDE_CODE_SUBAGENT_MODEL_FORCE' -ErrorAction SilentlyContinue
         $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS       = $maxContextTokens
+        Remove-Item 'Env:CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT' -ErrorAction SilentlyContinue
         $env:CLAUDE_CODE_ALWAYS_ENABLE_EFFORT     = '1'
         $env:CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = '3'
         $env:ENABLE_TOOL_SEARCH = if ($env:CLAUDEX_TOOL_SEARCH) { $env:CLAUDEX_TOOL_SEARCH } else { 'true' }

@@ -230,7 +230,8 @@ function claudeop {
     if ($null -eq $maxCtx) { $maxCtx = $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS }
 
     $names = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN',
-               'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+               'CLAUDE_CODE_SUBAGENT_MODEL', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
+               'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
                'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT',
                'CLAUDE_CODE_ALWAYS_ENABLE_EFFORT', 'CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY',
                'ENABLE_TOOL_SEARCH')
@@ -238,6 +239,9 @@ function claudeop {
     foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
 
     try {
+        # This route pins its own subagent model per branch below; a stale
+        # FORCE value from another route must not leak into this session.
+        Remove-Item 'Env:CLAUDE_CODE_SUBAGENT_MODEL_FORCE' -ErrorAction SilentlyContinue
         if ($model.StartsWith('claude-')) {
             # Direct Claude route: Go's OpenAI-compatible API uses Bearer auth.
             $env:ANTHROPIC_BASE_URL = Get-ClaudeopAnthropicBaseUrl

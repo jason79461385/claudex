@@ -91,7 +91,7 @@ function claudemini {
             return
         }
         $usable = @($models | Where-Object { $_.Usable })
-        $fallback = if ($env:CLAUDEMINI_FALLBACK_MODEL) { $env:CLAUDEMINI_FALLBACK_MODEL } else { 'gemini-3.1-pro-preview' }
+        $fallback = if ($env:CLAUDEMINI_FALLBACK_MODEL) { $env:CLAUDEMINI_FALLBACK_MODEL } else { 'gemini-3.8-flash-high' }
         $chosen = if ($env:CLAUDEMINI_MODEL) { $env:CLAUDEMINI_MODEL }
                   elseif ($usable.Count -gt 0) { $usable[0].Id }
                   else { $fallback }
@@ -119,7 +119,7 @@ function claudemini {
         }
     }
 
-    $fallback = if ($env:CLAUDEMINI_FALLBACK_MODEL) { $env:CLAUDEMINI_FALLBACK_MODEL } else { 'gemini-3.1-pro-preview' }
+    $fallback = if ($env:CLAUDEMINI_FALLBACK_MODEL) { $env:CLAUDEMINI_FALLBACK_MODEL } else { 'gemini-3.8-flash-high' }
     $fromEnvOrAuto = $false
     if ([string]::IsNullOrEmpty($model)) {
         if ($env:CLAUDEMINI_MODEL) { $model = $env:CLAUDEMINI_MODEL }
@@ -142,8 +142,9 @@ function claudemini {
     if (-not [string]::IsNullOrEmpty($disallow)) { $childArgs += '--disallowedTools'; $childArgs += $disallow }
     $childArgs += $Rest
 
-    $names = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_SUBAGENT_MODEL',
+    $names = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_SUBAGENT_MODEL',
                'CLAUDE_CODE_SUBAGENT_MODEL_FORCE', 'CLAUDE_CODE_MAX_CONTEXT_TOKENS',
+               'CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT',
                'CLAUDE_CODE_ALWAYS_ENABLE_EFFORT', 'CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY',
                'ENABLE_TOOL_SEARCH')
     $saved = @{}
@@ -151,10 +152,12 @@ function claudemini {
 
     try {
         $env:ANTHROPIC_BASE_URL   = if ($env:CLAUDEMINI_BASE_URL) { $env:CLAUDEMINI_BASE_URL } else { 'http://127.0.0.1:8317' }
+        Remove-Item 'Env:ANTHROPIC_API_KEY' -ErrorAction SilentlyContinue
         $env:ANTHROPIC_AUTH_TOKEN = if ($env:CLAUDEMINI_API_KEY)  { $env:CLAUDEMINI_API_KEY }  else { 'sk-dummy' }
         $env:CLAUDE_CODE_SUBAGENT_MODEL        = $sub
         $env:CLAUDE_CODE_SUBAGENT_MODEL_FORCE  = $force
         $env:CLAUDE_CODE_MAX_CONTEXT_TOKENS    = $maxCtx
+        Remove-Item 'Env:CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT' -ErrorAction SilentlyContinue
         $env:CLAUDE_CODE_ALWAYS_ENABLE_EFFORT     = '1'
         $env:CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = '3'
         $env:ENABLE_TOOL_SEARCH = $toolSearch

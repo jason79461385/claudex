@@ -40,7 +40,7 @@
 : "${CLAUDEMINI_SUBAGENT_MODEL:=}"
 : "${CLAUDEMINI_SUBAGENT_FORCE:=1}"
 : "${CLAUDEMINI_MAX_CONTEXT_TOKENS:=1000000}"
-: "${CLAUDEMINI_FALLBACK_MODEL:=gemini-3.1-pro-preview}"
+: "${CLAUDEMINI_FALLBACK_MODEL:=gemini-3.8-flash-high}"
 # The positive filter is what makes this script different from claudex: the same
 # proxy serves gpt-* and gemini-* together, so "newest usable id" is not enough.
 : "${CLAUDEMINI_INCLUDE:=gemini|antigravity}"
@@ -157,10 +157,12 @@ claudemini() {
   # CLI process, so one value covers the main session and every spawned agent.
   # There is no separate subagent-context knob in the CLI.
   ANTHROPIC_BASE_URL="$CLAUDEMINI_BASE_URL" \
+  ANTHROPIC_API_KEY= \
   ANTHROPIC_AUTH_TOKEN="$CLAUDEMINI_API_KEY" \
   CLAUDE_CODE_SUBAGENT_MODEL="$sub" \
   CLAUDE_CODE_SUBAGENT_MODEL_FORCE="$CLAUDEMINI_SUBAGENT_FORCE" \
   CLAUDE_CODE_MAX_CONTEXT_TOKENS="$CLAUDEMINI_MAX_CONTEXT_TOKENS" \
+  CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT= \
   CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1 \
   CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=3 \
   ENABLE_TOOL_SEARCH="$CLAUDEMINI_TOOL_SEARCH" \
